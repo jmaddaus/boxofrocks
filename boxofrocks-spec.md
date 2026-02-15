@@ -88,7 +88,7 @@ GitHub Issues is the remote store. Issue comments are the event log. Issue body 
 | id          | string   | Short hash ID (e.g., `sdu-a1b2`) |
 | github_id   | int      | GitHub Issue number            |
 | title       | string   | Issue title                    |
-| status      | string   | `open`, `in_progress`, `closed` |
+| status      | string   | `open`, `in_progress`, `blocked`, `in_review`, `closed` |
 | priority    | int      | 0-4 (0 = highest)             |
 | issue_type  | string   | `bug`, `feature`, `task`, `epic` |
 | description | string   | Issue body                     |

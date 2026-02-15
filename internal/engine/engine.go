@@ -87,8 +87,10 @@ func applyStatusChange(issue *model.Issue, event *model.Event, payload *model.Ev
 	if payload.Status == "" {
 		return issue, nil
 	}
-	if !ValidTransition(issue.Status, payload.Status) {
-		// Invalid transitions are silently ignored.
+	if IsTerminal(issue.Status) {
+		return issue, nil
+	}
+	if !FromStatusMatch(issue.Status, payload.FromStatus) {
 		return issue, nil
 	}
 	issue.Status = payload.Status
@@ -109,8 +111,7 @@ func applyClose(issue *model.Issue, event *model.Event) (*model.Issue, error) {
 	if issue == nil {
 		return nil, fmt.Errorf("close on non-existent issue %d", event.IssueID)
 	}
-	if !ValidTransition(issue.Status, model.StatusClosed) {
-		// Silently ignore invalid transitions.
+	if IsTerminal(issue.Status) || issue.Status == model.StatusClosed {
 		return issue, nil
 	}
 	issue.Status = model.StatusClosed
@@ -147,8 +148,7 @@ func applyDelete(issue *model.Issue, event *model.Event) (*model.Issue, error) {
 	if issue == nil {
 		return nil, fmt.Errorf("delete on non-existent issue %d", event.IssueID)
 	}
-	if !ValidTransition(issue.Status, model.StatusDeleted) {
-		// Silently ignore invalid transitions.
+	if IsTerminal(issue.Status) {
 		return issue, nil
 	}
 	issue.Status = model.StatusDeleted

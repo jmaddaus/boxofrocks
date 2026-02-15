@@ -7,6 +7,8 @@ type Status string
 const (
 	StatusOpen       Status = "open"
 	StatusInProgress Status = "in_progress"
+	StatusBlocked    Status = "blocked"
+	StatusInReview   Status = "in_review"
 	StatusClosed     Status = "closed"
 	StatusDeleted    Status = "deleted"
 )
@@ -17,6 +19,7 @@ const (
 	IssueTypeTask    IssueType = "task"
 	IssueTypeBug     IssueType = "bug"
 	IssueTypeFeature IssueType = "feature"
+	IssueTypeEpic    IssueType = "epic"
 )
 
 type Issue struct {

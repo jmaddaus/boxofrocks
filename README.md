@@ -103,7 +103,7 @@ Register a repository and trigger initial sync. Use `--offline` to skip GitHub v
 
 #### `bor create "title" [-p priority] [-t type] [-d description]`
 
-Create an issue. Priority is numeric (lower = higher priority, default 0). Type is `task`, `bug`, or `feature`.
+Create an issue. Priority is numeric (lower = higher priority, default 0). Type is `task`, `bug`, `feature`, or `epic`.
 
 #### `bor list [--all] [--status S] [--priority N]`
 
@@ -115,7 +115,7 @@ Get the highest-priority open unassigned issue.
 
 #### `bor update <id> [--status S] [--priority N] [--title T] [--description D]`
 
-Update issue fields. Status can be `open`, `in_progress`, or `closed`.
+Update issue fields. Status can be `open`, `in_progress`, `blocked`, `in_review`, or `closed`.
 
 #### `bor close <id>`
 
@@ -169,11 +169,10 @@ Issues are event-sourced. Each mutation appends an event comment to the GitHub I
 
 **Event types:** `create`, `status_change`, `assign`, `close`, `update`, `delete`, `reopen`
 
-**State transitions:**
-- `open` -> `in_progress`, `closed`
-- `in_progress` -> `open`, `closed`
-- `closed` -> `open` (reopen)
-- Invalid transitions are silently ignored during replay
+**From-status validation:** Status change events include a `from_status` field declaring the expected current state. If the actual current state doesn't match, the event is skipped (stale). Events without `from_status` (legacy) are always accepted. The `deleted` status is terminal — no further status changes are allowed.
+
+**Statuses:** `open`, `in_progress`, `blocked`, `in_review`, `closed`, `deleted`
+**Issue types:** `task`, `bug`, `feature`, `epic`
 
 ## Arbiter (GitHub Action)
 

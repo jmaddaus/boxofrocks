@@ -32,6 +32,7 @@ type EventPayload struct {
 	Title       string   `json:"title,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Status      Status   `json:"status,omitempty"`
+	FromStatus  Status   `json:"from_status,omitempty"`
 	Priority    *int     `json:"priority,omitempty"`
 	IssueType   string   `json:"issue_type,omitempty"`
 	Owner       string   `json:"owner,omitempty"`
