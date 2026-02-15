@@ -17,6 +17,14 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /bin/bor /usr/local/bin/bor
 
+# Data directory — DefaultConfig() resolves to $HOME/.boxofrocks.
+# Declare as a volume so data persists across container restarts
+# even without an explicit -v mount (Docker manages the volume).
+# Override by mounting a different path:
+#   docker run -v /my/data:/home/bor/.boxofrocks ...
+ENV HOME=/home/bor
+VOLUME /home/bor/.boxofrocks
+
 EXPOSE 8042
 
 ENTRYPOINT ["bor"]
