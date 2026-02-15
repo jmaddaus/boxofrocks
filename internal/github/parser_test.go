@@ -1,6 +1,7 @@
 package github
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -190,10 +191,10 @@ func TestFormatEventComment_And_ParseEventComment_RoundTrip(t *testing.T) {
 
 	formatted := FormatEventComment(event)
 
-	// Verify prefix
-	prefix := "[boxofrocks] "
+	// Verify versioned prefix.
+	prefix := "[boxofrocks:v1] "
 	if len(formatted) < len(prefix) || formatted[:len(prefix)] != prefix {
-		t.Fatalf("expected [boxofrocks] prefix, got %q", formatted[:20])
+		t.Fatalf("expected [boxofrocks:v1] prefix, got %q", formatted)
 	}
 
 	parsed, err := ParseEventComment(formatted)
@@ -218,6 +219,34 @@ func TestFormatEventComment_And_ParseEventComment_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseEventComment_LegacyUnversionedPrefix(t *testing.T) {
+	// Old format without version — must still parse for backwards compatibility.
+	body := `[boxofrocks] {"timestamp":"2024-01-15T10:30:00Z","action":"status_change","payload":"{\"status\":\"in_progress\"}","agent":"user1"}`
+
+	parsed, err := ParseEventComment(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed == nil {
+		t.Fatal("expected parsed event, got nil")
+	}
+	if parsed.Action != model.ActionStatusChange {
+		t.Errorf("expected action status_change, got %q", parsed.Action)
+	}
+}
+
+func TestParseEventComment_UnsupportedVersion(t *testing.T) {
+	body := `[boxofrocks:v99] {"timestamp":"2024-01-15T10:30:00Z","action":"create","payload":"{}","agent":"bot"}`
+
+	_, err := ParseEventComment(body)
+	if err == nil {
+		t.Fatal("expected error for unsupported schema version")
+	}
+	if !strings.Contains(err.Error(), "unsupported boxofrocks schema version v99") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 func TestParseEventComment_NonAgentTracker(t *testing.T) {
 	comments := []string{
 		"This is a regular comment.",
@@ -239,10 +268,15 @@ func TestParseEventComment_NonAgentTracker(t *testing.T) {
 }
 
 func TestParseEventComment_InvalidJSON(t *testing.T) {
-	body := "[boxofrocks] {invalid json}"
-	_, err := ParseEventComment(body)
-	if err == nil {
-		t.Error("expected error for invalid JSON")
+	bodies := []string{
+		"[boxofrocks] {invalid json}",
+		"[boxofrocks:v1] {invalid json}",
+	}
+	for _, body := range bodies {
+		_, err := ParseEventComment(body)
+		if err == nil {
+			t.Errorf("expected error for invalid JSON in %q", body)
+		}
 	}
 }
 

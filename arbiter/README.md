@@ -19,23 +19,54 @@ Add a workflow file to your repository at `.github/workflows/boxofrocks-reconcil
 ```yaml
 name: Box of Rocks Reconciler
 on:
-  issue_comment:
-    types: [created]
-  issues:
-    types: [opened, labeled]
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 jobs:
   reconcile:
-    if: >
-      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '[boxofrocks]'))
-      || github.event_name == 'issues'
     runs-on: ubuntu-latest
     steps:
-      - uses: jmaddaus/boxofrocks/arbiter@main
-        with:
-          issue-number: ${{ github.event.issue.number }}
+      - name: Download reconcile binary
+        run: |
+          curl -sL https://github.com/jmaddaus/boxofrocks/releases/latest/download/reconcile-linux-amd64 -o /tmp/reconcile
+          chmod +x /tmp/reconcile
+      - name: Reconcile all boxofrocks issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          gh issue list --label boxofrocks --state open --json number --jq '.[].number' | while read -r num; do
+            echo "Reconciling issue #${num}"
+            ISSUE_NUMBER="${num}" /tmp/reconcile
+          done
 ```
 
-This workflow triggers when a new boxofrocks comment is created on an issue, or when issues are opened or labeled via the web.
+This workflow runs every 15 minutes (and on manual dispatch), reconciling all open issues with the `boxofrocks` label. Adjust the cron schedule to match your needs.
+
+The composite action is still available for reconciling a single issue on demand.
+
+## Version Pinning
+
+Pin to a release tag to lock the reconcile binary version:
+
+```yaml
+# Pinned — uses the v1.2.0 binary
+- uses: jmaddaus/boxofrocks/arbiter@v1.2.0
+
+# Floating — always uses the latest release binary
+- uses: jmaddaus/boxofrocks/arbiter@main
+```
+
+When referencing a `v*` tag, the action downloads the binary from that specific release. Any other ref (branch, SHA) falls back to the latest release.
+
+To upgrade: change the tag in your workflow file (e.g., `@v1.2.0` → `@v1.3.0`).
+
+For the scheduled workflow above, replace the download URL to pin a version:
+
+```
+https://github.com/jmaddaus/boxofrocks/releases/download/v1.2.0/reconcile-linux-amd64
+```
 
 ## Building from Source
 

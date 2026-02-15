@@ -13,8 +13,11 @@ import (
 // metadataRe matches the boxofrocks metadata comment block in an issue body.
 var metadataRe = regexp.MustCompile(`(?m)^<!-- boxofrocks ({.*}) -->$`)
 
-// eventPrefixRe matches the [boxofrocks] prefix in event comments.
-var eventPrefixRe = regexp.MustCompile(`^\[boxofrocks\]\s*(.+)$`)
+// SchemaVersion is the current event comment wire format version.
+const SchemaVersion = 1
+
+// eventPrefixRe matches both [boxofrocks:v1] (versioned) and [boxofrocks] (legacy) prefixes.
+var eventPrefixRe = regexp.MustCompile(`^\[boxofrocks(?::v(\d+))?\]\s*(.+)$`)
 
 // MetadataBlock holds the structured metadata stored in a GitHub issue body.
 type MetadataBlock struct {
@@ -88,11 +91,13 @@ func FormatEventComment(event *model.Event) string {
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal event: %v", err))
 	}
-	return "[boxofrocks] " + string(data)
+	return fmt.Sprintf("[boxofrocks:v%d] %s", SchemaVersion, string(data))
 }
 
 // ParseEventComment parses a boxofrocks event from a comment body.
 // Returns nil if the comment is not a boxofrocks event.
+// Accepts both versioned ([boxofrocks:v1]) and legacy ([boxofrocks]) prefixes.
+// Returns an error for schema versions newer than SchemaVersion.
 func ParseEventComment(body string) (*model.Event, error) {
 	body = strings.TrimSpace(body)
 	matches := eventPrefixRe.FindStringSubmatch(body)
@@ -100,7 +105,19 @@ func ParseEventComment(body string) (*model.Event, error) {
 		return nil, nil
 	}
 
-	jsonStr := matches[1]
+	// matches[1] = version number (empty string for legacy unversioned prefix)
+	// matches[2] = JSON payload
+	if matches[1] != "" {
+		var version int
+		if _, err := fmt.Sscanf(matches[1], "%d", &version); err != nil {
+			return nil, fmt.Errorf("parse schema version: %w", err)
+		}
+		if version > SchemaVersion {
+			return nil, fmt.Errorf("unsupported boxofrocks schema version v%d (this binary supports up to v%d)", version, SchemaVersion)
+		}
+	}
+
+	jsonStr := matches[2]
 	var ej eventJSON
 	if err := json.Unmarshal([]byte(jsonStr), &ej); err != nil {
 		return nil, fmt.Errorf("parse event comment JSON: %w", err)
