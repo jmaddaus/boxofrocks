@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -203,6 +204,12 @@ func (d *Daemon) addRepo(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	if d.syncMgr != nil {
+		if err := d.syncMgr.AddRepo(repo); err != nil {
+			slog.Warn("failed to start syncer for new repo", "repo", repo.FullName(), "error", err)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, repo)

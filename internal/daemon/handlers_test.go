@@ -2,15 +2,19 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jmaddaus/boxofrocks/internal/config"
+	"github.com/jmaddaus/boxofrocks/internal/github"
 	"github.com/jmaddaus/boxofrocks/internal/model"
 	"github.com/jmaddaus/boxofrocks/internal/store"
+	borSync "github.com/jmaddaus/boxofrocks/internal/sync"
 )
 
 // testDaemon creates a Daemon backed by an in-memory SQLite store for testing.
@@ -590,5 +594,95 @@ func TestUpdateIssueNotFound(t *testing.T) {
 // itoa is a convenience for tests.
 func itoa(i int) string {
 	return fmt.Sprintf("%d", i)
+}
+
+// ---------------------------------------------------------------------------
+// noopGitHubClient implements github.Client for wiring tests.
+// ---------------------------------------------------------------------------
+
+type noopGitHubClient struct{}
+
+func (noopGitHubClient) ListIssues(ctx context.Context, owner, repo string, opts github.ListOpts) ([]*github.GitHubIssue, string, error) {
+	return nil, "", nil
+}
+func (noopGitHubClient) GetIssue(ctx context.Context, owner, repo string, number int) (*github.GitHubIssue, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (noopGitHubClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*github.GitHubIssue, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (noopGitHubClient) UpdateIssueBody(ctx context.Context, owner, repo string, number int, body string) error {
+	return fmt.Errorf("not implemented")
+}
+func (noopGitHubClient) ListComments(ctx context.Context, owner, repo string, number int, opts github.ListOpts) ([]*github.GitHubComment, string, error) {
+	return nil, "", nil
+}
+func (noopGitHubClient) CreateComment(ctx context.Context, owner, repo string, number int, body string) (*github.GitHubComment, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (noopGitHubClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
+	return nil
+}
+func (noopGitHubClient) GetRateLimit() github.RateLimit {
+	return github.RateLimit{Remaining: 5000, Reset: time.Now().Add(time.Hour)}
+}
+
+func TestAddRepoStartsSyncer(t *testing.T) {
+	s, err := store.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	cfg := &config.Config{
+		ListenAddr: ":0",
+		DataDir:    t.TempDir(),
+		DBPath:     ":memory:",
+	}
+
+	sm := borSync.NewSyncManager(s, noopGitHubClient{})
+	defer sm.Stop()
+
+	d := NewWithStoreAndSync(cfg, s, sm)
+
+	rr := doRequest(t, d, "POST", "/repos", map[string]string{
+		"owner": "testorg",
+		"name":  "testrepo",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create repo: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Give the syncer goroutine time to start.
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify syncMgr.Status() shows the new repo.
+	status := sm.Status()
+	if len(status) != 1 {
+		t.Fatalf("expected 1 repo in sync status, got %d", len(status))
+	}
+	for _, st := range status {
+		if st.RepoName != "testorg/testrepo" {
+			t.Errorf("expected repo name 'testorg/testrepo', got %q", st.RepoName)
+		}
+	}
+}
+
+func TestAddRepoWithoutSyncManager(t *testing.T) {
+	d := testDaemon(t) // syncMgr is nil
+
+	rr := doRequest(t, d, "POST", "/repos", map[string]string{
+		"owner": "testorg",
+		"name":  "testrepo",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create repo: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if repo.Owner != "testorg" || repo.Name != "testrepo" {
+		t.Errorf("unexpected repo: %+v", repo)
+	}
 }
 

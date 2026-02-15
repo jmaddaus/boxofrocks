@@ -177,15 +177,16 @@ type syncRequest struct {
 
 // RepoSyncer runs a sync loop for a single repository.
 type RepoSyncer struct {
-	repo     *model.RepoConfig
-	store    store.Store
-	ghClient github.Client
-	manager  *SyncManager // back-reference for rate limit
-	interval time.Duration
-	forceCh  chan syncRequest
-	stopCh   chan struct{}
-	status   SyncStatus
-	mu       sync.RWMutex
+	repo          *model.RepoConfig
+	store         store.Store
+	ghClient      github.Client
+	manager       *SyncManager // back-reference for rate limit
+	interval      time.Duration
+	forceCh       chan syncRequest
+	stopCh        chan struct{}
+	status        SyncStatus
+	mu            sync.RWMutex
+	labelEnsured  bool
 }
 
 func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr *SyncManager, interval time.Duration) *RepoSyncer {
@@ -267,6 +268,15 @@ func (rs *RepoSyncer) cycle(full bool) {
 	})
 
 	ctx := context.Background()
+
+	if !rs.labelEnsured {
+		rs.manager.checkRateLimit()
+		if err := rs.ghClient.CreateLabel(ctx, rs.repo.Owner, rs.repo.Name,
+			"boxofrocks", "6f42c1", "Tracked by boxofrocks"); err != nil {
+			slog.Warn("failed to ensure boxofrocks label", "repo", rs.repo.FullName(), "error", err)
+		}
+		rs.labelEnsured = true
+	}
 
 	// Push outbound events first.
 	if err := rs.pushOutbound(ctx); err != nil {

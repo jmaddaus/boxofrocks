@@ -2,8 +2,26 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 )
+
+// DBSchemaVersion is the current database schema version.
+// Bump this when adding migrations that change the schema.
+const DBSchemaVersion = 1
+
+// downMigrations maps a version to the SQL needed to reverse it.
+// Version N's entry contains statements that undo the changes introduced
+// when migrating from N-1 to N. For additive-only changes (ADD COLUMN,
+// CREATE TABLE IF NOT EXISTS), no reverse SQL is needed — just the
+// version number reset.
+//
+// Example for a future breaking migration:
+//
+//	2: []string{"ALTER TABLE issues DROP COLUMN new_col"},
+var downMigrations = map[int][]string{
+	// Version 1 is the baseline schema; nothing to reverse.
+}
 
 // alterColumn runs an ALTER TABLE ADD COLUMN and silently ignores
 // "duplicate column name" errors, making the migration idempotent.
@@ -81,8 +99,73 @@ var alterMigrations = []string{
 	`ALTER TABLE repos ADD COLUMN issues_since TEXT DEFAULT ''`,
 }
 
+// OpenRawDB opens a SQLite database without running migrations or
+// checking the schema version. Used by the migration tool.
+func OpenRawDB(dbPath string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set WAL mode: %w", err)
+	}
+	return db, nil
+}
+
+// ReadDBVersion returns the current schema version from the database.
+func ReadDBVersion(db *sql.DB) (int, error) {
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return 0, fmt.Errorf("read schema version: %w", err)
+	}
+	return version, nil
+}
+
+// DowngradeDB downgrades the database from its current version to the
+// target version, running any reverse migrations along the way.
+// For additive-only schema changes, this just resets user_version.
+// For breaking changes, it executes the registered down migration SQL.
+func DowngradeDB(db *sql.DB, current, target int) error {
+	if target >= current {
+		return fmt.Errorf("target version %d must be less than current version %d", target, current)
+	}
+	if target < 0 {
+		return fmt.Errorf("target version must be >= 0")
+	}
+
+	// Run reverse migrations from current down to target+1.
+	for v := current; v > target; v-- {
+		if stmts, ok := downMigrations[v]; ok {
+			for _, stmt := range stmts {
+				if _, err := db.Exec(stmt); err != nil {
+					return fmt.Errorf("down migration v%d: %w", v, err)
+				}
+			}
+		}
+	}
+
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", target)); err != nil {
+		return fmt.Errorf("set schema version: %w", err)
+	}
+	return nil
+}
+
 // runMigrations applies all migration statements in order.
+// It checks the database schema version and refuses to proceed if the
+// database was created by a newer binary (to prevent data corruption
+// on rollback).
 func runMigrations(db *sql.DB) error {
+	var dbVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&dbVersion); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if dbVersion > DBSchemaVersion {
+		return fmt.Errorf(
+			"database schema version %d is newer than this binary supports (max %d); upgrade the binary or use a different database",
+			dbVersion, DBSchemaVersion)
+	}
+
 	for _, m := range migrations {
 		if _, err := db.Exec(m); err != nil {
 			return err
@@ -93,5 +176,12 @@ func runMigrations(db *sql.DB) error {
 			return err
 		}
 	}
+
+	if dbVersion < DBSchemaVersion {
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", DBSchemaVersion)); err != nil {
+			return fmt.Errorf("set schema version: %w", err)
+		}
+	}
+
 	return nil
 }
