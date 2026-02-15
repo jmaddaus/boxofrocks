@@ -1,0 +1,129 @@
+{
+  "name": "interleaved events for multiple issues",
+  "events": [
+    {
+      "id": 1,
+      "repo_id": 100,
+      "issue_id": 1,
+      "timestamp": "2025-01-01T00:00:00Z",
+      "action": "create",
+      "payload": "{\"title\":\"Issue One\",\"description\":\"First issue\",\"priority\":1,\"issue_type\":\"bug\",\"labels\":[\"backend\"]}",
+      "synced": 0
+    },
+    {
+      "id": 2,
+      "repo_id": 100,
+      "issue_id": 2,
+      "timestamp": "2025-01-01T00:01:00Z",
+      "action": "create",
+      "payload": "{\"title\":\"Issue Two\",\"description\":\"Second issue\",\"priority\":5,\"issue_type\":\"feature\",\"labels\":[\"frontend\"]}",
+      "synced": 0
+    },
+    {
+      "id": 3,
+      "repo_id": 100,
+      "issue_id": 3,
+      "timestamp": "2025-01-01T00:02:00Z",
+      "action": "create",
+      "payload": "{\"title\":\"Issue Three\",\"description\":\"Third issue\",\"priority\":2,\"issue_type\":\"task\",\"labels\":[]}",
+      "synced": 0
+    },
+    {
+      "id": 4,
+      "repo_id": 100,
+      "issue_id": 1,
+      "timestamp": "2025-01-01T01:00:00Z",
+      "action": "assign",
+      "payload": "{\"owner\":\"bob\"}",
+      "synced": 0
+    },
+    {
+      "id": 5,
+      "repo_id": 100,
+      "issue_id": 2,
+      "timestamp": "2025-01-01T01:01:00Z",
+      "action": "status_change",
+      "payload": "{\"status\":\"in_progress\"}",
+      "synced": 0
+    },
+    {
+      "id": 6,
+      "repo_id": 100,
+      "issue_id": 1,
+      "timestamp": "2025-01-01T02:00:00Z",
+      "action": "status_change",
+      "payload": "{\"status\":\"in_progress\"}",
+      "synced": 0
+    },
+    {
+      "id": 7,
+      "repo_id": 100,
+      "issue_id": 3,
+      "timestamp": "2025-01-01T02:01:00Z",
+      "action": "delete",
+      "payload": "{}",
+      "synced": 0
+    },
+    {
+      "id": 8,
+      "repo_id": 100,
+      "issue_id": 2,
+      "timestamp": "2025-01-01T03:00:00Z",
+      "action": "close",
+      "payload": "{}",
+      "synced": 0
+    },
+    {
+      "id": 9,
+      "repo_id": 100,
+      "issue_id": 1,
+      "timestamp": "2025-01-01T03:01:00Z",
+      "action": "close",
+      "payload": "{}",
+      "synced": 0
+    }
+  ],
+  "expected": {
+    "1": {
+      "id": 1,
+      "repo_id": 100,
+      "title": "Issue One",
+      "status": "closed",
+      "priority": 1,
+      "issue_type": "bug",
+      "description": "First issue",
+      "owner": "bob",
+      "labels": ["backend"],
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T03:01:00Z",
+      "closed_at": "2025-01-01T03:01:00Z"
+    },
+    "2": {
+      "id": 2,
+      "repo_id": 100,
+      "title": "Issue Two",
+      "status": "closed",
+      "priority": 5,
+      "issue_type": "feature",
+      "description": "Second issue",
+      "owner": "",
+      "labels": ["frontend"],
+      "created_at": "2025-01-01T00:01:00Z",
+      "updated_at": "2025-01-01T03:00:00Z",
+      "closed_at": "2025-01-01T03:00:00Z"
+    },
+    "3": {
+      "id": 3,
+      "repo_id": 100,
+      "title": "Issue Three",
+      "status": "deleted",
+      "priority": 2,
+      "issue_type": "task",
+      "description": "Third issue",
+      "owner": "",
+      "labels": [],
+      "created_at": "2025-01-01T00:02:00Z",
+      "updated_at": "2025-01-01T02:01:00Z"
+    }
+  }
+}

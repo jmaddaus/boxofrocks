@@ -1,0 +1,56 @@
+{
+  "name": "invalid transitions are silently ignored",
+  "events": [
+    {
+      "id": 1,
+      "repo_id": 100,
+      "issue_id": 1,
+      "timestamp": "2025-01-01T00:00:00Z",
+      "action": "create",
+      "payload": "{\"title\":\"Transition test\",\"description\":\"Test invalid transitions\",\"priority\":1,\"issue_type\":\"feature\",\"labels\":[]}",
+      "synced": 0
+    },
+    {
+      "id": 2,
+      "repo_id": 100,
+      "issue_id": 1,
+      "timestamp": "2025-01-01T01:00:00Z",
+      "action": "status_change",
+      "payload": "{\"status\":\"closed\"}",
+      "synced": 0
+    },
+    {
+      "id": 3,
+      "repo_id": 100,
+      "issue_id": 1,
+      "timestamp": "2025-01-01T02:00:00Z",
+      "action": "status_change",
+      "payload": "{\"status\":\"in_progress\"}",
+      "synced": 0
+    },
+    {
+      "id": 4,
+      "repo_id": 100,
+      "issue_id": 1,
+      "timestamp": "2025-01-01T03:00:00Z",
+      "action": "reopen",
+      "payload": "{}",
+      "synced": 0
+    }
+  ],
+  "expected": {
+    "1": {
+      "id": 1,
+      "repo_id": 100,
+      "title": "Transition test",
+      "status": "open",
+      "priority": 1,
+      "issue_type": "feature",
+      "description": "Test invalid transitions",
+      "owner": "",
+      "labels": [],
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T03:00:00Z"
+    }
+  }
+}

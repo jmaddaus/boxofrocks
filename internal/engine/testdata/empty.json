@@ -1,0 +1,5 @@
+{
+  "name": "empty event list produces empty result",
+  "events": [],
+  "expected": {}
+}
