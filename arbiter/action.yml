@@ -1,0 +1,20 @@
+name: 'Agent Tracker Reconciler'
+description: 'Reconciles agent-tracker events on GitHub Issues'
+inputs:
+  issue-number:
+    description: 'The issue number to reconcile'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Download reconcile binary
+      shell: bash
+      run: |
+        curl -sL https://github.com/jmaddaus/boxofrocks/releases/latest/download/reconcile-linux-amd64 -o /tmp/reconcile
+        chmod +x /tmp/reconcile
+    - name: Run reconciliation
+      shell: bash
+      run: /tmp/reconcile
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
