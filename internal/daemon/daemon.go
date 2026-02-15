@@ -104,7 +104,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("agent-tracker daemon listening", "addr", d.cfg.ListenAddr)
+		slog.Info("boxofrocks daemon listening", "addr", d.cfg.ListenAddr)
 		if err := d.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}

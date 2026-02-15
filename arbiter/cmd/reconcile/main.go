@@ -48,12 +48,12 @@ func main() {
 		log.Fatalf("fetch comments: %v", err)
 	}
 
-	// 2. Parse agent-tracker events from comments
+	// 2. Parse boxofrocks events from comments
 	var events []*model.Event
 	for _, c := range comments {
 		ev, err := github.ParseEventComment(c.Body)
 		if err != nil || ev == nil {
-			continue // Skip non-agent-tracker comments
+			continue // Skip non-boxofrocks comments
 		}
 		ev.ID = c.ID // Use comment ID for ordering
 		ev.IssueID = issueNum
@@ -63,7 +63,7 @@ func main() {
 	}
 
 	if len(events) == 0 {
-		log.Println("no agent-tracker events found, nothing to reconcile")
+		log.Println("no boxofrocks events found, nothing to reconcile")
 		return
 	}
 

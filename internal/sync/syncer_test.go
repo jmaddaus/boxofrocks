@@ -447,13 +447,13 @@ func TestPullInbound_NewComments(t *testing.T) {
 		Number:    10,
 		Title:     "Existing Issue",
 		State:     "open",
-		Labels:    []github.GitHubLabel{{Name: "agent-tracker"}},
+		Labels:    []github.GitHubLabel{{Name: "boxofrocks"}},
 		CreatedAt: time.Now().UTC().Add(-1 * time.Hour),
 		UpdatedAt: time.Now().UTC(),
 	}
 	gh.addGitHubIssue("testowner", "testrepo", ghIssue)
 
-	// Create an agent-tracker comment.
+	// Create an boxofrocks comment.
 	statusEv := &model.Event{
 		Timestamp: time.Now().UTC(),
 		Action:    model.ActionStatusChange,
@@ -503,7 +503,7 @@ func TestPullInbound_WebCreatedIssue(t *testing.T) {
 		Title:     "Web Created Issue",
 		Body:      "Created via GitHub web UI",
 		State:     "open",
-		Labels:    []github.GitHubLabel{{Name: "agent-tracker"}},
+		Labels:    []github.GitHubLabel{{Name: "boxofrocks"}},
 		CreatedAt: time.Now().UTC().Add(-30 * time.Minute),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -580,7 +580,7 @@ func TestPullInbound_Incremental(t *testing.T) {
 		Number:    20,
 		Title:     "Incremental Test",
 		State:     "open",
-		Labels:    []github.GitHubLabel{{Name: "agent-tracker"}},
+		Labels:    []github.GitHubLabel{{Name: "boxofrocks"}},
 		CreatedAt: time.Now().UTC().Add(-2 * time.Hour),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -746,7 +746,7 @@ func TestGenerateSyntheticCreate(t *testing.T) {
 		Title:     "Synthetic Test",
 		Body:      "Some description",
 		State:     "open",
-		Labels:    []github.GitHubLabel{{Name: "agent-tracker"}, {Name: "bug"}},
+		Labels:    []github.GitHubLabel{{Name: "boxofrocks"}, {Name: "bug"}},
 		CreatedAt: time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
 	}
@@ -780,11 +780,11 @@ func TestGenerateSyntheticCreate(t *testing.T) {
 	if payload.Description != "Some description" {
 		t.Errorf("expected description 'Some description', got '%s'", payload.Description)
 	}
-	// Should include "bug" label but not "agent-tracker".
+	// Should include "bug" label but not "boxofrocks".
 	foundBug := false
 	for _, l := range payload.Labels {
-		if l == "agent-tracker" {
-			t.Error("should not include agent-tracker label in payload")
+		if l == "boxofrocks" {
+			t.Error("should not include boxofrocks label in payload")
 		}
 		if l == "bug" {
 			foundBug = true

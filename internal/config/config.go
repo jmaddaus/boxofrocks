@@ -13,18 +13,18 @@ import (
 // Config holds the daemon configuration.
 type Config struct {
 	ListenAddr string `json:"listen_addr"` // default ":8042"
-	DataDir    string `json:"data_dir"`    // default "~/.agent-tracker"
-	DBPath     string `json:"db_path"`     // default "{data_dir}/tracker.db"
+	DataDir    string `json:"data_dir"`    // default "~/.boxofrocks"
+	DBPath     string `json:"db_path"`     // default "{data_dir}/bor.db"
 }
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
-	dataDir := filepath.Join(home, ".agent-tracker")
+	dataDir := filepath.Join(home, ".boxofrocks")
 	return &Config{
 		ListenAddr: ":8042",
 		DataDir:    dataDir,
-		DBPath:     filepath.Join(dataDir, "tracker.db"),
+		DBPath:     filepath.Join(dataDir, "bor.db"),
 	}
 }
 
@@ -45,7 +45,7 @@ func expandHome(path string) string {
 	return path
 }
 
-// Load reads configuration from ~/.agent-tracker/config.json.
+// Load reads configuration from ~/.boxofrocks/config.json.
 // If the file does not exist, it returns the default configuration.
 func Load() (*Config, error) {
 	cfg := DefaultConfig()
@@ -69,7 +69,7 @@ func Load() (*Config, error) {
 
 	// If DBPath is empty after loading, set the default relative to DataDir.
 	if cfg.DBPath == "" {
-		cfg.DBPath = filepath.Join(cfg.DataDir, "tracker.db")
+		cfg.DBPath = filepath.Join(cfg.DataDir, "bor.db")
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -105,7 +105,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Save writes the configuration to ~/.agent-tracker/config.json.
+// Save writes the configuration to ~/.boxofrocks/config.json.
 func Save(cfg *Config) error {
 	if err := EnsureDataDir(cfg); err != nil {
 		return err

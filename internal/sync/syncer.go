@@ -331,7 +331,7 @@ func (rs *RepoSyncer) pushOutbound(ctx context.Context) error {
 				rs.repo.Name,
 				issue.Title,
 				issue.Description,
-				append([]string{"agent-tracker"}, issue.Labels...),
+				append([]string{"boxofrocks"}, issue.Labels...),
 			)
 			if err != nil {
 				return fmt.Errorf("create github issue: %w", err)
@@ -381,10 +381,10 @@ func (rs *RepoSyncer) pushOutbound(ctx context.Context) error {
 func (rs *RepoSyncer) pullInbound(ctx context.Context) error {
 	rs.manager.checkRateLimit()
 
-	// List GitHub issues with agent-tracker label.
+	// List GitHub issues with boxofrocks label.
 	issues, newETag, err := rs.ghClient.ListIssues(ctx, rs.repo.Owner, rs.repo.Name, github.ListOpts{
 		ETag:   rs.repo.IssuesETag,
-		Labels: "agent-tracker",
+		Labels: "boxofrocks",
 	})
 	if err != nil {
 		return fmt.Errorf("list issues: %w", err)
@@ -412,7 +412,7 @@ func (rs *RepoSyncer) pullInboundFull(ctx context.Context) error {
 	rs.manager.checkRateLimit()
 
 	issues, newETag, err := rs.ghClient.ListIssues(ctx, rs.repo.Owner, rs.repo.Name, github.ListOpts{
-		Labels: "agent-tracker",
+		Labels: "boxofrocks",
 	})
 	if err != nil {
 		return fmt.Errorf("list issues (full): %w", err)
@@ -479,7 +479,7 @@ func (rs *RepoSyncer) processGitHubIssue(ctx context.Context, ghIssue *github.Gi
 
 			ev, err := github.ParseEventComment(c.Body)
 			if err != nil || ev == nil {
-				// Not an agent-tracker comment; skip.
+				// Not a boxofrocks comment; skip.
 				continue
 			}
 

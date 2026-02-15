@@ -1,5 +1,5 @@
-name: 'Agent Tracker Reconciler'
-description: 'Reconciles agent-tracker events on GitHub Issues'
+name: 'Box of Rocks Reconciler'
+description: 'Reconciles boxofrocks events on GitHub Issues'
 inputs:
   issue-number:
     description: 'The issue number to reconcile'

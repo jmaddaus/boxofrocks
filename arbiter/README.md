@@ -1,11 +1,11 @@
-# Agent Tracker Reconciler (Arbiter)
+# Box of Rocks Reconciler (Arbiter)
 
-The arbiter is a GitHub Action that reconciles event-sourced state on GitHub Issues. It reads all agent-tracker event comments on an issue, replays them through the state engine, and updates the issue body metadata to reflect the current derived state.
+The arbiter is a GitHub Action that reconciles event-sourced state on GitHub Issues. It reads all boxofrocks event comments on an issue, replays them through the state engine, and updates the issue body metadata to reflect the current derived state.
 
 ## How It Works
 
 1. Fetches all comments on the specified GitHub issue
-2. Filters comments to those prefixed with `[agent-tracker]`
+2. Filters comments to those prefixed with `[boxofrocks]`
 3. Parses each matching comment into a structured event
 4. Replays all events through the state engine to derive current issue state
 5. Updates the issue body with the reconciled metadata (status, priority, owner, labels, issue type)
@@ -14,16 +14,16 @@ Human-written text in the issue body is preserved; only the hidden metadata comm
 
 ## Installation
 
-Add a workflow file to your repository at `.github/workflows/agent-tracker-reconcile.yml`:
+Add a workflow file to your repository at `.github/workflows/boxofrocks-reconcile.yml`:
 
 ```yaml
-name: Agent Tracker Reconciler
+name: Box of Rocks Reconciler
 on:
   issue_comment:
     types: [created]
 jobs:
   reconcile:
-    if: startsWith(github.event.comment.body, '[agent-tracker]')
+    if: startsWith(github.event.comment.body, '[boxofrocks]')
     runs-on: ubuntu-latest
     steps:
       - uses: jmaddaus/boxofrocks/arbiter@main
@@ -31,7 +31,7 @@ jobs:
           issue-number: ${{ github.event.issue.number }}
 ```
 
-This workflow triggers whenever a new comment is created on an issue. It only runs the reconciliation if the comment starts with the `[agent-tracker]` prefix.
+This workflow triggers whenever a new comment is created on an issue. It only runs the reconciliation if the comment starts with the `[boxofrocks]` prefix.
 
 ## Building from Source
 

@@ -1,4 +1,4 @@
-# Agent Tracker (`at`)
+# Box of Rocks (`bor`)
 
 A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background.
 
@@ -6,22 +6,22 @@ A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: 
 
 ```bash
 # Build
-go build -o at ./cmd/at
+go build -o bor ./cmd/bor
 
 # Start the daemon (runs in foreground)
-at daemon start
+bor daemon start
 
 # In another terminal: initialize a repo
-at init --repo owner/name
+bor init --repo owner/name
 
 # Create and manage issues
-at create "Fix login bug" -p 1 -t bug -d "Users can't log in with SSO"
-at list
-at next
-at update 1 --status in_progress
-at assign 1 agent-1
-at close 1
-at list --all
+bor create "Fix login bug" -p 1 -t bug -d "Users can't log in with SSO"
+bor list
+bor next
+bor update 1 --status in_progress
+bor assign 1 agent-1
+bor close 1
+bor list --all
 ```
 
 ## Installation
@@ -29,7 +29,7 @@ at list --all
 Requires Go 1.22+.
 
 ```bash
-go install github.com/jmaddaus/boxofrocks/cmd/at@latest
+go install github.com/jmaddaus/boxofrocks/cmd/bor@latest
 ```
 
 Or build from source:
@@ -37,13 +37,13 @@ Or build from source:
 ```bash
 git clone https://github.com/jmaddaus/boxofrocks.git
 cd boxofrocks
-go build -o at ./cmd/at
+go build -o bor ./cmd/bor
 ```
 
 ## Architecture
 
 ```
-CLI (at) ──HTTP──> Daemon ──> SQLite (local cache)
+CLI (bor) ──HTTP──> Daemon ──> SQLite (local cache)
                      │
                      └──sync──> GitHub Issues (remote store)
                                     │
@@ -52,18 +52,18 @@ CLI (at) ──HTTP──> Daemon ──> SQLite (local cache)
 
 - **Daemon** runs in the foreground, serves a REST API on `127.0.0.1:8042`, and syncs with GitHub in the background.
 - **CLI** talks to the daemon over HTTP. All commands work instantly from local cache.
-- **Events** are appended as GitHub Issue comments prefixed with `[agent-tracker]`. State is derived by replaying events.
+- **Events** are appended as GitHub Issue comments prefixed with `[boxofrocks]`. State is derived by replaying events.
 - **Arbiter** is a GitHub Action that triggers on new comments, replays events, and writes authoritative state into the issue body.
 
 ## Configuration
 
-Config is stored at `~/.agent-tracker/config.json`:
+Config is stored at `~/.boxofrocks/config.json`:
 
 ```json
 {
   "listen_addr": ":8042",
-  "data_dir": "~/.agent-tracker",
-  "db_path": "~/.agent-tracker/tracker.db"
+  "data_dir": "~/.boxofrocks",
+  "db_path": "~/.boxofrocks/bor.db"
 }
 ```
 
@@ -89,39 +89,39 @@ If no token is found, the daemon starts but sync is disabled. Issues can still b
 
 ### Commands
 
-#### `at daemon start`
+#### `bor daemon start`
 
 Start the daemon in the foreground. Use systemd, launchd, or `nohup` for background operation.
 
-#### `at daemon status`
+#### `bor daemon status`
 
 Check if the daemon is running and show sync status.
 
-#### `at init --repo owner/name [--offline]`
+#### `bor init --repo owner/name [--offline]`
 
 Register a repository and trigger initial sync. Use `--offline` to skip GitHub validation and start with an empty state.
 
-#### `at create "title" [-p priority] [-t type] [-d description]`
+#### `bor create "title" [-p priority] [-t type] [-d description]`
 
 Create an issue. Priority is numeric (lower = higher priority, default 0). Type is `task`, `bug`, or `feature`.
 
-#### `at list [--all] [--status S] [--priority N]`
+#### `bor list [--all] [--status S] [--priority N]`
 
 List issues. By default, deleted issues are hidden. Use `--all` to include them.
 
-#### `at next`
+#### `bor next`
 
 Get the highest-priority open unassigned issue.
 
-#### `at update <id> [--status S] [--priority N] [--title T] [--description D]`
+#### `bor update <id> [--status S] [--priority N] [--title T] [--description D]`
 
 Update issue fields. Status can be `open`, `in_progress`, or `closed`.
 
-#### `at close <id>`
+#### `bor close <id>`
 
-Close an issue (shorthand for `at update <id> --status closed`).
+Close an issue (shorthand for `bor update <id> --status closed`).
 
-#### `at assign <id> <owner>`
+#### `bor assign <id> <owner>`
 
 Assign an issue to an owner.
 
@@ -130,8 +130,8 @@ Assign an issue to an owner.
 The daemon manages multiple repositories on one machine. When multiple repos are registered, specify which repo to target:
 
 ```bash
-at --repo owner/repo1 list
-at --repo owner/repo2 create "New issue"
+bor --repo owner/repo1 list
+bor --repo owner/repo2 create "New issue"
 ```
 
 If only one repo is registered, it is used implicitly.
@@ -142,7 +142,7 @@ When running CLI commands from inside a Docker container while the daemon runs o
 
 ```bash
 export TRACKER_HOST=http://host.docker.internal:8042
-at list
+bor list
 ```
 
 ## Offline Operation
@@ -156,7 +156,7 @@ After initial setup, the daemon works without network connectivity:
 For first-time setup without connectivity:
 
 ```bash
-at init --repo owner/name --offline
+bor init --repo owner/name --offline
 ```
 
 ## Event Model
@@ -164,7 +164,7 @@ at init --repo owner/name --offline
 Issues are event-sourced. Each mutation appends an event comment to the GitHub Issue:
 
 ```
-[agent-tracker] {"timestamp":"2024-01-15T10:30:00Z","action":"status_change","payload":{"status":"in_progress"}}
+[boxofrocks] {"timestamp":"2024-01-15T10:30:00Z","action":"status_change","payload":{"status":"in_progress"}}
 ```
 
 **Event types:** `create`, `status_change`, `assign`, `close`, `update`, `delete`, `reopen`
@@ -198,7 +198,7 @@ go vet ./...
 ### Project Structure
 
 ```
-cmd/at/                    Entry point
+cmd/bor/                   Entry point
 internal/
   model/                   Issue, Event, RepoConfig types
   store/                   SQLite storage layer

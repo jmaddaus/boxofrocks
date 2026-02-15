@@ -10,7 +10,7 @@ import (
 func TestParseMetadata_Valid(t *testing.T) {
 	body := `This is the issue description.
 
-<!-- agent-tracker {"status":"open","priority":2,"issue_type":"task","owner":"alice","labels":["bug","urgent"]} -->`
+<!-- boxofrocks {"status":"open","priority":2,"issue_type":"task","owner":"alice","labels":["bug","urgent"]} -->`
 
 	meta, humanText, err := ParseMetadata(body)
 	if err != nil {
@@ -57,7 +57,7 @@ func TestParseMetadata_NoMetadata(t *testing.T) {
 func TestParseMetadata_EmptyLabels(t *testing.T) {
 	body := `Description here.
 
-<!-- agent-tracker {"status":"in_progress","priority":1,"issue_type":"bug","owner":"","labels":[]} -->`
+<!-- boxofrocks {"status":"in_progress","priority":1,"issue_type":"bug","owner":"","labels":[]} -->`
 
 	meta, _, err := ParseMetadata(body)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestParseMetadata_MetadataWithSurroundingText(t *testing.T) {
 
 Second paragraph.
 
-<!-- agent-tracker {"status":"closed","priority":3,"issue_type":"feature","owner":"bob","labels":["enhancement"]} -->`
+<!-- boxofrocks {"status":"closed","priority":3,"issue_type":"feature","owner":"bob","labels":["enhancement"]} -->`
 
 	meta, humanText, err := ParseMetadata(body)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestRenderBody_Basic(t *testing.T) {
 	result := RenderBody("This is a description.", meta)
 
 	// Should contain both the human text and the metadata
-	expected := "This is a description.\n\n<!-- agent-tracker {\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"\",\"labels\":[]} -->"
+	expected := "This is a description.\n\n<!-- boxofrocks {\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"\",\"labels\":[]} -->"
 	if result != expected {
 		t.Errorf("expected:\n%s\ngot:\n%s", expected, result)
 	}
@@ -128,7 +128,7 @@ func TestRenderBody_EmptyHumanText(t *testing.T) {
 	}
 
 	result := RenderBody("", meta)
-	expected := `<!-- agent-tracker {"status":"open","priority":1,"issue_type":"bug","owner":"alice","labels":["bug"]} -->`
+	expected := `<!-- boxofrocks {"status":"open","priority":1,"issue_type":"bug","owner":"alice","labels":["bug"]} -->`
 	if result != expected {
 		t.Errorf("expected:\n%s\ngot:\n%s", expected, result)
 	}
@@ -191,8 +191,9 @@ func TestFormatEventComment_And_ParseEventComment_RoundTrip(t *testing.T) {
 	formatted := FormatEventComment(event)
 
 	// Verify prefix
-	if len(formatted) < 16 || formatted[:16] != "[agent-tracker] " {
-		t.Fatalf("expected [agent-tracker] prefix, got %q", formatted[:20])
+	prefix := "[boxofrocks] "
+	if len(formatted) < len(prefix) || formatted[:len(prefix)] != prefix {
+		t.Fatalf("expected [boxofrocks] prefix, got %q", formatted[:20])
 	}
 
 	parsed, err := ParseEventComment(formatted)
@@ -232,13 +233,13 @@ func TestParseEventComment_NonAgentTracker(t *testing.T) {
 			t.Errorf("unexpected error for %q: %v", body, err)
 		}
 		if parsed != nil {
-			t.Errorf("expected nil for non-agent-tracker comment %q, got %+v", body, parsed)
+			t.Errorf("expected nil for non-boxofrocks comment %q, got %+v", body, parsed)
 		}
 	}
 }
 
 func TestParseEventComment_InvalidJSON(t *testing.T) {
-	body := "[agent-tracker] {invalid json}"
+	body := "[boxofrocks] {invalid json}"
 	_, err := ParseEventComment(body)
 	if err == nil {
 		t.Error("expected error for invalid JSON")

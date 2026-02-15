@@ -10,11 +10,11 @@ import (
 	"github.com/jmaddaus/boxofrocks/internal/model"
 )
 
-// metadataRe matches the agent-tracker metadata comment block in an issue body.
-var metadataRe = regexp.MustCompile(`(?m)^<!-- agent-tracker ({.*}) -->$`)
+// metadataRe matches the boxofrocks metadata comment block in an issue body.
+var metadataRe = regexp.MustCompile(`(?m)^<!-- boxofrocks ({.*}) -->$`)
 
-// eventPrefixRe matches the [agent-tracker] prefix in event comments.
-var eventPrefixRe = regexp.MustCompile(`^\[agent-tracker\]\s*(.+)$`)
+// eventPrefixRe matches the [boxofrocks] prefix in event comments.
+var eventPrefixRe = regexp.MustCompile(`^\[boxofrocks\]\s*(.+)$`)
 
 // MetadataBlock holds the structured metadata stored in a GitHub issue body.
 type MetadataBlock struct {
@@ -25,7 +25,7 @@ type MetadataBlock struct {
 	Labels    []string `json:"labels"`
 }
 
-// ParseMetadata extracts the agent-tracker JSON from an issue body.
+// ParseMetadata extracts the boxofrocks JSON from an issue body.
 // Returns the metadata and the human-visible text (body without the metadata block).
 // If no metadata block is found, returns nil metadata and the full body.
 func ParseMetadata(body string) (*MetadataBlock, string, error) {
@@ -39,7 +39,7 @@ func ParseMetadata(body string) (*MetadataBlock, string, error) {
 
 	var meta MetadataBlock
 	if err := json.Unmarshal([]byte(jsonStr), &meta); err != nil {
-		return nil, body, fmt.Errorf("parse agent-tracker metadata: %w", err)
+		return nil, body, fmt.Errorf("parse boxofrocks metadata: %w", err)
 	}
 
 	// Remove the metadata line from the body to get human-visible text
@@ -51,7 +51,7 @@ func ParseMetadata(body string) (*MetadataBlock, string, error) {
 	return &meta, humanText, nil
 }
 
-// RenderBody combines human text with agent-tracker metadata into a full issue body.
+// RenderBody combines human text with boxofrocks metadata into a full issue body.
 func RenderBody(humanText string, meta *MetadataBlock) string {
 	jsonData, err := json.Marshal(meta)
 	if err != nil {
@@ -59,7 +59,7 @@ func RenderBody(humanText string, meta *MetadataBlock) string {
 		panic(fmt.Sprintf("failed to marshal metadata: %v", err))
 	}
 
-	metaLine := fmt.Sprintf("<!-- agent-tracker %s -->", string(jsonData))
+	metaLine := fmt.Sprintf("<!-- boxofrocks %s -->", string(jsonData))
 
 	if humanText == "" {
 		return metaLine
@@ -88,11 +88,11 @@ func FormatEventComment(event *model.Event) string {
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal event: %v", err))
 	}
-	return "[agent-tracker] " + string(data)
+	return "[boxofrocks] " + string(data)
 }
 
-// ParseEventComment parses an agent-tracker event from a comment body.
-// Returns nil if the comment is not an agent-tracker event.
+// ParseEventComment parses a boxofrocks event from a comment body.
+// Returns nil if the comment is not a boxofrocks event.
 func ParseEventComment(body string) (*model.Event, error) {
 	body = strings.TrimSpace(body)
 	matches := eventPrefixRe.FindStringSubmatch(body)

@@ -1,11 +1,11 @@
-# CLAUDE.md - Agent Tracker (`at`)
+# CLAUDE.md - Box of Rocks (`bor`)
 
 ## Project Overview
 
-Agent Tracker is a daemon + CLI issue tracker backed by GitHub Issues, written in Go. Issues are event-sourced: GitHub Issue comments form an append-only event log, the daemon caches locally in SQLite, and a GitHub Action arbiter computes authoritative state server-side.
+Box of Rocks is a daemon + CLI issue tracker backed by GitHub Issues, written in Go. Issues are event-sourced: GitHub Issue comments form an append-only event log, the daemon caches locally in SQLite, and a GitHub Action arbiter computes authoritative state server-side.
 
 **Module:** `github.com/jmaddaus/boxofrocks`
-**Binary:** `cmd/at/main.go` (single binary for both CLI and daemon)
+**Binary:** `cmd/bor/main.go` (single binary for both CLI and daemon)
 **Go version:** 1.22+ (uses `ServeMux` path value routing)
 **External dependency:** `modernc.org/sqlite` (pure Go, no CGO)
 
@@ -32,7 +32,7 @@ CLI ──HTTP──> Daemon ──> SQLite       (local, instant)
 ### Package Dependency Graph
 
 ```
-cmd/at → cli → daemon → {store, engine, sync, config}
+cmd/bor → cli → daemon → {store, engine, sync, config}
                          sync → {store, engine, github}
 arbiter → {engine, github}
 model ← (used by all packages)
@@ -49,14 +49,14 @@ model ← (used by all packages)
 | `internal/sync` | `SyncManager` + per-repo `RepoSyncer` goroutines | Yes (14) |
 | `internal/daemon` | HTTP server, routes, handlers, middleware | Yes (22) |
 | `internal/cli` | CLI commands, HTTP client to daemon, output formatting | No |
-| `internal/config` | `~/.agent-tracker/config.json` management | No |
+| `internal/config` | `~/.boxofrocks/config.json` management | No |
 | `arbiter/cmd/reconcile` | Standalone binary for GitHub Action | No |
 
 ## Key Design Patterns
 
 ### Event Sourcing
 
-Every mutation (create, update, close, assign, delete) appends an `Event` to the store with `synced=0`. The sync layer pushes these as `[agent-tracker] {...}` comments on GitHub Issues. Inbound comments are parsed and applied incrementally via `engine.Apply()`.
+Every mutation (create, update, close, assign, delete) appends an `Event` to the store with `synced=0`. The sync layer pushes these as `[boxofrocks] {...}` comments on GitHub Issues. Inbound comments are parsed and applied incrementally via `engine.Apply()`.
 
 **Critical invariant:** `engine.Apply()` and `engine.Replay()` must produce identical results for the same event sequence. The arbiter binary uses the same engine package. Do not duplicate replay logic.
 
@@ -85,8 +85,8 @@ Invalid transitions are silently ignored during replay (not errors). This is int
 
 Each `RepoSyncer` poll cycle:
 1. **Push outbound:** query `PendingEvents(synced=0)`, post as GitHub comments, mark synced
-2. **Pull inbound:** list GitHub issues with `agent-tracker` label, fetch new comments since `last_comment_id`, apply incrementally
-3. **Web-created issues:** GitHub issues with `agent-tracker` label but no local match get a synthetic `create` event
+2. **Pull inbound:** list GitHub issues with `boxofrocks` label, fetch new comments since `last_comment_id`, apply incrementally
+3. **Web-created issues:** GitHub issues with `boxofrocks` label but no local match get a synthetic `create` event
 
 ### Interfaces for Testability
 
@@ -109,8 +109,8 @@ Each `RepoSyncer` poll cycle:
 - **`DeleteIssue` is a soft-delete.** Sets `status=deleted` and appends a delete event. Deleted issues are excluded from `list` and `next` unless `?all=true`.
 - **`NextIssue` returns lowest priority number** (lower = higher priority). `ORDER BY priority ASC, created_at ASC` where `status='open' AND owner=''`.
 - **Labels are JSON arrays in SQLite.** Stored as TEXT, marshaled/unmarshaled on read/write.
-- **Event comments use `[agent-tracker]` prefix.** Parser expects this exact prefix. Human comments without it are ignored.
-- **Metadata blocks use HTML comments.** `<!-- agent-tracker {"status":"open",...} -->` in issue bodies. Parser preserves surrounding human text.
+- **Event comments use `[boxofrocks]` prefix.** Parser expects this exact prefix. Human comments without it are ignored.
+- **Metadata blocks use HTML comments.** `<!-- boxofrocks {"status":"open",...} -->` in issue bodies. Parser preserves surrounding human text.
 - **Rate limiting is shared.** `SyncManager` holds shared rate limit state across all repos. Individual `RepoSyncer` goroutines check via `manager.checkRateLimit()`.
 
 ## Adding a New Event Action
@@ -142,9 +142,9 @@ Each `RepoSyncer` poll cycle:
 
 ## Configuration
 
-Default config at `~/.agent-tracker/config.json`:
+Default config at `~/.boxofrocks/config.json`:
 ```json
-{"listen_addr": ":8042", "data_dir": "~/.agent-tracker", "db_path": "~/.agent-tracker/tracker.db"}
+{"listen_addr": ":8042", "data_dir": "~/.boxofrocks", "db_path": "~/.boxofrocks/bor.db"}
 ```
 
 `TRACKER_HOST` env var overrides the daemon URL (default `http://127.0.0.1:8042`). Used for Docker containers pointing at `host.docker.internal`.

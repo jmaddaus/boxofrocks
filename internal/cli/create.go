@@ -17,7 +17,7 @@ func runCreate(args []string, gf globalFlags) error {
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
-		return fmt.Errorf("usage: at create \"title\" [-p priority] [-t type] [-d description]")
+		return fmt.Errorf("usage: bor create \"title\" [-p priority] [-t type] [-d description]")
 	}
 	title := remaining[0]
 

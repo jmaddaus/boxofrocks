@@ -14,7 +14,7 @@ import (
 
 func runDaemon(args []string, gf globalFlags) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: at daemon <start|status>")
+		return fmt.Errorf("usage: bor daemon <start|status>")
 	}
 	switch args[0] {
 	case "start":
@@ -22,7 +22,7 @@ func runDaemon(args []string, gf globalFlags) error {
 	case "status":
 		return runDaemonStatus(gf)
 	default:
-		return fmt.Errorf("unknown daemon subcommand: %s\nUsage: at daemon <start|status>", args[0])
+		return fmt.Errorf("unknown daemon subcommand: %s\nUsage: bor daemon <start|status>", args[0])
 	}
 }
 
@@ -79,7 +79,7 @@ func runDaemonStatus(gf globalFlags) error {
 	client := newClient(gf)
 	health, err := client.Health()
 	if err != nil {
-		return fmt.Errorf("daemon not running at %s; start with: at daemon start", gf.host)
+		return fmt.Errorf("daemon not running at %s; start with: bor daemon start", gf.host)
 	}
 
 	if gf.pretty {

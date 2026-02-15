@@ -309,19 +309,19 @@ func TestCreateLabel_Success(t *testing.T) {
 
 		var payload map[string]string
 		json.NewDecoder(r.Body).Decode(&payload)
-		if payload["name"] != "agent-tracker" {
-			t.Errorf("expected name 'agent-tracker', got %v", payload["name"])
+		if payload["name"] != "boxofrocks" {
+			t.Errorf("expected name 'boxofrocks', got %v", payload["name"])
 		}
 		if payload["color"] != "0e8a16" {
 			t.Errorf("expected color '0e8a16', got %v", payload["color"])
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"name":"agent-tracker","color":"0e8a16"}`))
+		w.Write([]byte(`{"name":"boxofrocks","color":"0e8a16"}`))
 	})
 	defer ts.Close()
 
-	err := client.CreateLabel(context.Background(), "owner", "repo", "agent-tracker", "#0e8a16", "Managed by agent-tracker")
+	err := client.CreateLabel(context.Background(), "owner", "repo", "boxofrocks", "#0e8a16", "Managed by boxofrocks")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestCreateLabel_AlreadyExists(t *testing.T) {
 	})
 	defer ts.Close()
 
-	err := client.CreateLabel(context.Background(), "owner", "repo", "agent-tracker", "0e8a16", "desc")
+	err := client.CreateLabel(context.Background(), "owner", "repo", "boxofrocks", "0e8a16", "desc")
 	if err != nil {
 		t.Fatalf("expected no error on 422 (already exists), got: %v", err)
 	}

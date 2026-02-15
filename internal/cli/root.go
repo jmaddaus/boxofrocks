@@ -8,10 +8,10 @@ import (
 
 const defaultHost = "http://127.0.0.1:8042"
 
-const usage = `at - Agent Tracker
+const usage = `bor - Box of Rocks
 
 Usage:
-  at [global flags] <command> [flags]
+  bor [global flags] <command> [flags]
 
 Commands:
   daemon     Manage the daemon (start, status)
@@ -30,7 +30,7 @@ Global Flags:
   --repo NAME    Repository owner/name (default: auto-detect from git remote)
   --pretty       Use pretty-printed output instead of JSON
 
-Run 'at <command> --help' for more information on a command.`
+Run 'bor <command> --help' for more information on a command.`
 
 // globalFlags holds flags that are available to all subcommands.
 type globalFlags struct {
@@ -109,7 +109,7 @@ func Run(args []string, version string) error {
 		fmt.Println(usage)
 		return nil
 	case "version", "--version", "-v":
-		fmt.Printf("at version %s\n", version)
+		fmt.Printf("bor version %s\n", version)
 		return nil
 	case "daemon":
 		return runDaemon(subArgs, gf)
@@ -128,6 +128,6 @@ func Run(args []string, version string) error {
 	case "assign":
 		return runAssign(subArgs, gf)
 	default:
-		return fmt.Errorf("unknown command: %s\nRun 'at help' for usage", strings.TrimSpace(cmd))
+		return fmt.Errorf("unknown command: %s\nRun 'bor help' for usage", strings.TrimSpace(cmd))
 	}
 }

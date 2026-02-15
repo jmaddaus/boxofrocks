@@ -12,7 +12,7 @@ import (
 	"github.com/jmaddaus/boxofrocks/internal/store"
 )
 
-// ProcessNewComments processes a set of GitHub comments, parses agent-tracker
+// ProcessNewComments processes a set of GitHub comments, parses boxofrocks
 // events from them, and applies them incrementally to the given issue.
 // It returns the updated issue state.
 func ProcessNewComments(
@@ -27,7 +27,7 @@ func ProcessNewComments(
 	for _, c := range comments {
 		ev, err := github.ParseEventComment(c.Body)
 		if err != nil || ev == nil {
-			// Not an agent-tracker event; skip.
+			// Not an boxofrocks event; skip.
 			continue
 		}
 
@@ -62,8 +62,8 @@ func ProcessNewComments(
 }
 
 // GenerateSyntheticCreate creates a "create" event from a GitHub issue that
-// has no agent-tracker metadata. This is used when a user creates an issue on
-// the web with the agent-tracker label.
+// has no boxofrocks metadata. This is used when a user creates an issue on
+// the web with the boxofrocks label.
 func GenerateSyntheticCreate(ghIssue *github.GitHubIssue, repoID int, localIssueID int) *model.Event {
 	// Parse metadata if present.
 	meta, description, _ := github.ParseMetadata(ghIssue.Body)
@@ -83,11 +83,11 @@ func GenerateSyntheticCreate(ghIssue *github.GitHubIssue, repoID int, localIssue
 		payload.Description = ghIssue.Body
 	}
 
-	// Collect non-agent-tracker labels from the GitHub issue.
+	// Collect non-boxofrocks labels from the GitHub issue.
 	if meta == nil {
 		var labels []string
 		for _, l := range ghIssue.Labels {
-			if l.Name != "agent-tracker" {
+			if l.Name != "boxofrocks" {
 				labels = append(labels, l.Name)
 			}
 		}
@@ -140,7 +140,7 @@ func ReplayFromComments(
 	}
 
 	if len(events) == 0 {
-		return nil, nil, fmt.Errorf("no agent-tracker events found in comments")
+		return nil, nil, fmt.Errorf("no boxofrocks events found in comments")
 	}
 
 	issueMap, err := engine.Replay(events)

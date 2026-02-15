@@ -1,4 +1,4 @@
-# Agent Tracker — Lightweight Issue Tracker for AI Agents
+# Box of Rocks — Lightweight Issue Tracker for AI Agents
 
 ## Problem
 
@@ -48,7 +48,7 @@ Beads (the current solution) embeds issue data inside git repos, requiring compl
 
 Single long-running process per machine. Listens on `127.0.0.1:<PORT>`.
 
-- Embedded SQLite database at `~/.agent-tracker/tracker.db`
+- Embedded SQLite database at `~/.boxofrocks/bor.db`
 - REST API for all operations
 - Background sync goroutine polls GitHub Issues every 5 seconds
 - Uses ETags to minimize API usage (~720 reads/hour worst case)
@@ -59,12 +59,12 @@ Single long-running process per machine. Listens on `127.0.0.1:<PORT>`.
 Thin HTTP client that talks to the daemon. Drop-in replacement for `bd` commands.
 
 ```
-at list                          # list open issues
-at list --all                    # list all issues
-at create "Fix the bug" -p 1    # create issue
-at close <id>                    # close issue
-at update <id> --status active   # update status
-at next                          # get next available task
+bor list                          # list open issues
+bor list --all                    # list all issues
+bor create "Fix the bug" -p 1    # create issue
+bor close <id>                    # close issue
+bor update <id> --status active   # update status
+bor next                          # get next available task
 ```
 
 All output is JSON by default (agent-friendly). Add `--pretty` for human-readable.
@@ -123,7 +123,7 @@ On startup, the daemon resolves a GitHub token automatically in order:
 1. `git credential fill` — uses existing git HTTPS credentials
 2. `gh auth token` — uses GitHub CLI token
 3. `GITHUB_TOKEN` env var
-4. OAuth Device Flow — interactive first-time setup, token stored in `~/.agent-tracker/token`
+4. OAuth Device Flow — interactive first-time setup, token stored in `~/.boxofrocks/token`
 
 User never manually configures auth.
 
@@ -140,25 +140,25 @@ CLI binary can be baked into container images. Same commands, just pointed at th
 ```bash
 # Inside container
 export TRACKER_HOST=http://host.docker.internal:8042
-at list
-at close sdu-a1b2
+bor list
+bor close sdu-a1b2
 ```
 
 ## Installation
 
 ```bash
 # Install
-go install github.com/<org>/agent-tracker@latest
+go install github.com/<org>/boxofrocks@latest
 
 # Start daemon (auto-detects GitHub auth)
-at daemon start
+bor daemon start
 
 # Initialize for a GitHub repo
-at init --repo jmaddaus/SDU
+bor init --repo jmaddaus/SDU
 
 # Use
-at create "Implement repair bay" -p 2 -t feature
-at list
+bor create "Implement repair bay" -p 2 -t feature
+bor list
 ```
 
 ## What This Doesn't Do (By Design)
@@ -201,7 +201,7 @@ Implement repair bay with animated progress bar
 - Working feature, tested
 - Progress bar animation
 
-<!-- agent-tracker
+<!-- boxofrocks
 {"priority":2,"issue_type":"feature","status":"in_progress","owner":"agent-2","local_id":"sdu-a1b2"}
 -->
 ```
@@ -263,7 +263,7 @@ jobs:
         with:
           script: |
             // Fetch all comments (events)
-            // Filter to agent-tracker JSON events
+            // Filter to boxofrocks JSON events
             // Replay in timestamp order
             // Apply rules (permissions, valid transitions)
             // Compute final state

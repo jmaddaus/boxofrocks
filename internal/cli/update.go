@@ -19,7 +19,7 @@ func runUpdate(args []string, gf globalFlags) error {
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
-		return fmt.Errorf("usage: at update <id> [--status S] [--priority N] [--title T] [--description D]")
+		return fmt.Errorf("usage: bor update <id> [--status S] [--priority N] [--title T] [--description D]")
 	}
 
 	id, err := strconv.Atoi(remaining[0])

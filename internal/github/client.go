@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.github.com"
-	userAgent      = "agent-tracker/1.0"
+	userAgent      = "boxofrocks/1.0"
 	acceptHeader   = "application/vnd.github+json"
 )
 

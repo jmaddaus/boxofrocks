@@ -53,7 +53,7 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
-			return nil, fmt.Errorf("daemon not running at %s; start with: at daemon start", c.baseURL)
+			return nil, fmt.Errorf("daemon not running at %s; start with: bor daemon start", c.baseURL)
 		}
 		return nil, fmt.Errorf("request failed (is the daemon running?): %w", err)
 	}

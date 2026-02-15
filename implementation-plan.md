@@ -4,7 +4,7 @@
 
 The current issue tracker ("beads") embeds issue data in git repos, requiring merge drivers, worktrees, and sync daemons. This breaks down with multiple worktrees, PR-based merges, and sandboxed agent environments.
 
-boxofrocks (Agent Tracker, CLI binary: `at`) replaces this with a daemon + CLI architecture backed by GitHub Issues as the remote store. Issues are event-sourced: comments are an append-only event log, a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages sync in the background.
+boxofrocks (Box of Rocks, CLI binary: `bor`) replaces this with a daemon + CLI architecture backed by GitHub Issues as the remote store. Issues are event-sourced: comments are an append-only event log, a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages sync in the background.
 
 **Key decisions:**
 - Generic/configurable (no hardcoded repo defaults)
@@ -19,7 +19,7 @@ boxofrocks (Agent Tracker, CLI binary: `at`) replaces this with a daemon + CLI a
 
 ```
 boxofrocks/
-├── cmd/at/main.go                         # Single binary (daemon + CLI dispatch)
+├── cmd/bor/main.go                        # Single binary (daemon + CLI dispatch)
 ├── internal/
 │   ├── model/
 │   │   ├── issue.go                       # Issue struct, status/priority/type constants
@@ -36,7 +36,7 @@ boxofrocks/
 │   ├── github/
 │   │   ├── client.go                      # GitHub REST API (issues, comments, ETags, pagination)
 │   │   ├── auth.go                        # Token resolution chain (3 methods)
-│   │   └── parser.go                      # Parse/render agent-tracker JSON in issue body
+│   │   └── parser.go                      # Parse/render boxofrocks JSON in issue body
 │   ├── sync/
 │   │   ├── syncer.go                      # SyncManager + per-repo RepoSyncer goroutines
 │   │   └── reconciler.go                  # Incremental event processing + reconciliation
@@ -50,19 +50,19 @@ boxofrocks/
 │   │   ├── client.go                      # HTTP client wrapper to daemon
 │   │   ├── output.go                      # JSON / --pretty formatting
 │   │   ├── repo.go                        # Auto-detect repo from git remote
-│   │   ├── daemon.go                      # at daemon start/stop/status
-│   │   ├── init.go                        # at init --repo owner/name
+│   │   ├── daemon.go                      # bor daemon start/stop/status
+│   │   ├── init.go                        # bor init --repo owner/name
 │   │   ├── list.go, create.go, close.go   # Issue commands
 │   │   ├── update.go, next.go             # Issue commands
 │   │   └── assign.go                      # Assignment command
 │   └── config/
-│       └── config.go                      # ~/.agent-tracker/config.json management
+│       └── config.go                      # ~/.boxofrocks/config.json management
 ├── arbiter/
 │   ├── cmd/reconcile/main.go              # Go binary for arbiter (same engine as daemon)
 │   ├── action.yml                         # Composite GitHub Action
 │   └── README.md                          # Installation guide
 ├── go.mod
-└── agent-tracker-spec.md
+└── boxofrocks-spec.md
 ```
 
 **External dependency:** `modernc.org/sqlite` (pure-Go SQLite, no CGO). Everything else uses Go stdlib.
@@ -79,13 +79,13 @@ Rationale: Generated prefixes ("first letter + consonants") collide easily ("ser
 
 ### Daemon runs in foreground only
 
-`at daemon start` runs in the foreground. No PID file management, no backgrounding via os/exec self-launch. Users who want background operation use systemd, launchd, or `nohup`/`&`.
+`bor daemon start` runs in the foreground. No PID file management, no backgrounding via os/exec self-launch. Users who want background operation use systemd, launchd, or `nohup`/`&`.
 
 Rationale: PID file management is fiddly — stale PIDs, crashed processes, cross-platform differences. Foreground-only is simpler and more debuggable.
 
 ### Incremental event replay (not full replay every cycle)
 
-Each repo tracks `last_processed_comment_id` per GitHub issue. On each sync cycle, only fetch and process comments newer than the last processed ID. Full replay only happens on first sync or explicit `at sync --full`.
+Each repo tracks `last_processed_comment_id` per GitHub issue. On each sync cycle, only fetch and process comments newer than the last processed ID. Full replay only happens on first sync or explicit `bor sync --full`.
 
 Schema addition:
 ```sql
@@ -111,11 +111,11 @@ Rationale: Two implementations in different languages will drift. Shared Go code
 Agent-tracker events use a dedicated prefix to distinguish them from human comments:
 
 ```
-[agent-tracker] {"timestamp":"...","action":"status_change",...}
+[boxofrocks] {"timestamp":"...","action":"status_change",...}
 ```
 
-The `[agent-tracker]` prefix is used for:
-- **GitHub Action filter:** `if: startsWith(github.event.comment.body, '[agent-tracker]')` — more specific than matching any `{`
+The `[boxofrocks]` prefix is used for:
+- **GitHub Action filter:** `if: startsWith(github.event.comment.body, '[boxofrocks]')` — more specific than matching any `{`
 - **Comment parsing:** Daemon and arbiter strip the prefix before parsing JSON
 - **Human-friendly:** The prefix is visible in comments, making it clear what they are
 
@@ -123,11 +123,11 @@ Human comments and random JSON pastes are ignored entirely.
 
 ### Label auto-creation
 
-`at init` creates the `agent-tracker` label on the repo if it doesn't already exist. The label is used to filter issues during sync. If label creation fails (e.g., permissions), `at init` warns but continues — the user can create it manually. The sync cycle also attempts label creation on the first issue create if it hasn't been created yet, handling the 422 gracefully.
+`bor init` creates the `boxofrocks` label on the repo if it doesn't already exist. The label is used to filter issues during sync. If label creation fails (e.g., permissions), `bor init` warns but continues — the user can create it manually. The sync cycle also attempts label creation on the first issue create if it hasn't been created yet, handling the 422 gracefully.
 
 ### Web-created issues are handled
 
-When the sync pulls a GitHub issue with the `agent-tracker` label but no `<!-- agent-tracker ... -->` metadata block:
+When the sync pulls a GitHub issue with the `boxofrocks` label but no `<!-- boxofrocks ... -->` metadata block:
 1. The daemon treats it as a new issue, generates a synthetic `create` event from the issue title/body/labels
 2. Posts the `create` event as a comment
 3. The arbiter then writes the metadata block into the issue body
@@ -153,7 +153,7 @@ The SyncManager distributes API budget across repos. With a 5000 req/hour limit:
 ### Offline / disconnected operation
 
 - **After init:** If GitHub is unreachable, daemon starts and serves from local cache. Issues can be created, updated, closed — all stored as pending events (synced=0). When connectivity returns, pending events sync on the next cycle.
-- **First-time init:** `at init --repo owner/name` requires connectivity to validate the repo exists and discover existing issues. Without connectivity, `at init --repo owner/name --offline` skips validation and starts with an empty state, syncing when connectivity becomes available.
+- **First-time init:** `bor init --repo owner/name` requires connectivity to validate the repo exists and discover existing issues. Without connectivity, `bor init --repo owner/name --offline` skips validation and starts with an empty state, syncing when connectivity becomes available.
 
 ---
 
@@ -223,11 +223,11 @@ CREATE TABLE issue_sync_state (
 
 ### Phase 0: Project Scaffolding
 
-**Goal:** Compilable Go module. `go build` works. `at help` prints usage.
+**Goal:** Compilable Go module. `go build` works. `bor help` prints usage.
 
 **Create:**
 - `go.mod` (module `github.com/jmaddaus/boxofrocks`, Go 1.22+)
-- `cmd/at/main.go` — minimal main with subcommand dispatch skeleton, prints help/version
+- `cmd/bor/main.go` — minimal main with subcommand dispatch skeleton, prints help/version
 - `internal/model/issue.go` — Issue struct, Status/Priority/IssueType constants
 - `internal/model/event.go` — Event struct, Action constants
 - `internal/model/repo.go` — RepoConfig struct
@@ -294,7 +294,7 @@ CREATE TABLE issue_sync_state (
 - `internal/daemon/routes.go` — Route registration (Go 1.22 `ServeMux`)
 - `internal/daemon/handlers.go` — All REST handlers
 - `internal/daemon/handlers_test.go`
-- `internal/config/config.go` — `~/.agent-tracker/config.json` management
+- `internal/config/config.go` — `~/.boxofrocks/config.json` management
 
 **REST API (all return JSON):**
 ```
@@ -307,7 +307,7 @@ DELETE /issues/{id}         — soft-delete (appends "delete" event)
 POST   /issues/{id}/assign  — assign (appends "assign" event)
 GET    /health              — health + sync status per repo
 POST   /sync                — force sync (query: repo)
-POST   /repos               — register repo (used by `at init`)
+POST   /repos               — register repo (used by `bor init`)
 GET    /repos               — list registered repos
 ```
 
@@ -328,16 +328,16 @@ GET    /repos               — list registered repos
 - `internal/cli/client.go` — HTTP client wrapper to daemon
 - `internal/cli/output.go` — JSON (default) and pretty-print (tabwriter)
 - `internal/cli/repo.go` — Auto-detect repo from `git remote get-url origin`
-- `internal/cli/daemon.go` — `at daemon start` (foreground), `at daemon status` (ping /health)
-- `internal/cli/init.go` — `at init --repo owner/name [--offline]`
-- `internal/cli/list.go` — `at list [--all] [--status X] [--priority N]`
-- `internal/cli/create.go` — `at create "title" [-p priority] [-t type] [-d description]`
-- `internal/cli/close.go` — `at close <id>`
-- `internal/cli/update.go` — `at update <id> [--status S] [--priority N] ...`
-- `internal/cli/next.go` — `at next`
-- `internal/cli/assign.go` — `at assign <id> <owner>`
+- `internal/cli/daemon.go` — `bor daemon start` (foreground), `bor daemon status` (ping /health)
+- `internal/cli/init.go` — `bor init --repo owner/name [--offline]`
+- `internal/cli/list.go` — `bor list [--all] [--status X] [--priority N]`
+- `internal/cli/create.go` — `bor create "title" [-p priority] [-t type] [-d description]`
+- `internal/cli/close.go` — `bor close <id>`
+- `internal/cli/update.go` — `bor update <id> [--status S] [--priority N] ...`
+- `internal/cli/next.go` — `bor next`
+- `internal/cli/assign.go` — `bor assign <id> <owner>`
 
-**No backgrounding logic.** `at daemon start` runs in the foreground. Users use systemd/launchd/nohup for background operation.
+**No backgrounding logic.** `bor daemon start` runs in the foreground. Users use systemd/launchd/nohup for background operation.
 
 **CLI env var:** `TRACKER_HOST` overrides base URL (default `http://127.0.0.1:8042`). Used by Docker containers pointing at `host.docker.internal`.
 
@@ -354,7 +354,7 @@ GET    /repos               — list registered repos
 **Create:**
 - `internal/github/auth.go` — `ResolveToken()` trying: `git credential fill` → `gh auth token` → `GITHUB_TOKEN`
 - `internal/github/client.go` — GitHub REST API client with ETag support and pagination
-- `internal/github/parser.go` — Parse/render `<!-- agent-tracker ... -->` JSON in issue bodies
+- `internal/github/parser.go` — Parse/render `<!-- boxofrocks ... -->` JSON in issue bodies
 - Tests for all three files
 
 **GitHub client interface:**
@@ -402,17 +402,17 @@ type ListOpts struct {
 
 **RepoSyncer poll cycle:**
 1. **Push outbound:** Query pending events (synced=0).
-   - For creates where `github_id` is null: call `CreateIssue` on GitHub (with `agent-tracker` label and initial body), store returned issue number, post create event as first comment.
+   - For creates where `github_id` is null: call `CreateIssue` on GitHub (with `boxofrocks` label and initial body), store returned issue number, post create event as first comment.
    - For other events: look up `github_id`, post event as comment.
    - Mark synced on success.
 2. **Pull inbound (incremental):**
-   - List GitHub issues with `agent-tracker` label (using ETag).
+   - List GitHub issues with `boxofrocks` label (using ETag).
    - For each issue, check `issue_sync_state.last_comment_id`.
    - Fetch only comments with `since` parameter (comments after `last_comment_at`).
-   - Parse new JSON events from comment bodies (strip `[agent-tracker]` prefix).
+   - Parse new JSON events from comment bodies (strip `[boxofrocks]` prefix).
    - Apply new events incrementally via `engine.Apply()`.
    - Update `issue_sync_state` with latest comment ID.
-3. **Handle web-created issues:** If a GitHub issue has `agent-tracker` label but no `<!-- agent-tracker -->` block and no tracked local issue, generate a synthetic `create` event from the issue metadata, post it as a comment, and create the local issue.
+3. **Handle web-created issues:** If a GitHub issue has `boxofrocks` label but no `<!-- boxofrocks -->` block and no tracked local issue, generate a synthetic `create` event from the issue metadata, post it as a comment, and create the local issue.
 4. **Update metadata:** `last_sync_at`, ETags.
 
 **Force full replay:** `POST /sync?full=true` triggers full comment fetch + `engine.Replay()` for all issues in a repo. Used for recovery or debugging.
@@ -421,13 +421,13 @@ type ListOpts struct {
 
 ---
 
-### Phase 7: `at init` and Multi-Repo Wiring
+### Phase 7: `bor init` and Multi-Repo Wiring
 
 **Goal:** Full init flow, multi-repo lifecycle, discovery of existing issues.
 
 **Implement:**
-- `at init --repo owner/name [--offline]` registers repo and starts sync
-- Online init: validate repo exists on GitHub, create `agent-tracker` label if missing, discover existing labeled issues, import them via full replay
+- `bor init --repo owner/name [--offline]` registers repo and starts sync
+- Online init: validate repo exists on GitHub, create `boxofrocks` label if missing, discover existing labeled issues, import them via full replay
 - Offline init (`--offline`): skip GitHub validation and label creation, start with empty state, sync and create label when connectivity becomes available
 - Wire SyncManager into daemon lifecycle (start syncers for all registered repos on daemon start)
 - Handle daemon start with no connectivity (start syncers, they retry with backoff)
@@ -444,22 +444,22 @@ type ListOpts struct {
 - `arbiter/cmd/reconcile/main.go` — Go binary that:
   1. Reads issue number and repo from env vars (`GITHUB_REPOSITORY`, inputs)
   2. Fetches all comments via GitHub API (using `GITHUB_TOKEN`)
-  3. Filters to valid agent-tracker JSON events (strips `[agent-tracker]` prefix)
+  3. Filters to valid boxofrocks JSON events (strips `[boxofrocks]` prefix)
   4. Replays via `internal/engine.Replay()` (same code as daemon)
   5. Reads current issue body, extracts human text via `internal/github/parser`
-  6. Writes updated body with computed state in `<!-- agent-tracker -->` block
+  6. Writes updated body with computed state in `<!-- boxofrocks -->` block
 - `arbiter/action.yml` — Composite action metadata
 - `arbiter/README.md` — Installation and setup guide
 
 **Example workflow for users:**
 ```yaml
-name: Agent Tracker Reconciler
+name: Box of Rocks Reconciler
 on:
   issue_comment:
     types: [created]
 jobs:
   reconcile:
-    if: startsWith(github.event.comment.body, '[agent-tracker]')
+    if: startsWith(github.event.comment.body, '[boxofrocks]')
     runs-on: ubuntu-latest
     steps:
       - name: Download arbiter
@@ -491,9 +491,9 @@ jobs:
 - Graceful shutdown with context timeout on SIGINT/SIGTERM
 - Port conflict handling (clear error message if port already in use)
 - Config validation (repo format `owner/name`, port range)
-- `at daemon status` shows per-repo sync status, last sync time, pending event count, uptime
+- `bor daemon status` shows per-repo sync status, last sync time, pending event count, uptime
 - `--pretty` output polished for all commands (tabwriter alignment)
-- Consistent, actionable error messages (e.g., "daemon not running, start with: at daemon start")
+- Consistent, actionable error messages (e.g., "daemon not running, start with: bor daemon start")
 - README.md: installation, quickstart, configuration, Docker/sandbox usage, arbiter setup
 - Docker documentation: `TRACKER_HOST=http://host.docker.internal:8042`
 
@@ -528,40 +528,40 @@ go test ./...
 End-to-end smoke test after Phase 7:
 ```bash
 # Terminal 1: start daemon
-at daemon start
+bor daemon start
 
 # Terminal 2: use CLI
-at init --repo owner/name
-at create "Test issue" -p 1 -t bug
-at list
-at next
-at update 1 --status in_progress
-at assign 1 agent-1
-at close 1
-at list --all
+bor init --repo owner/name
+bor create "Test issue" -p 1 -t bug
+bor list
+bor next
+bor update 1 --status in_progress
+bor assign 1 agent-1
+bor close 1
+bor list --all
 # Ctrl+C daemon in Terminal 1
 ```
 
 Sync verification (requires GitHub token):
 ```bash
-at daemon start &
-at init --repo owner/testproject
-at create "Synced issue" -p 2 -t feature
+bor daemon start &
+bor init --repo owner/testproject
+bor create "Synced issue" -p 2 -t feature
 # Wait 5-10s for sync
-# Verify issue appears on GitHub with agent-tracker label and metadata block
+# Verify issue appears on GitHub with boxofrocks label and metadata block
 # Verify event comment posted
-# Create issue on GitHub web UI with agent-tracker label
+# Create issue on GitHub web UI with boxofrocks label
 # Wait 5-10s
-at list  # Should show the web-created issue
+bor list  # Should show the web-created issue
 ```
 
 Offline verification:
 ```bash
 # With no network
-at daemon start &
-at init --repo owner/name --offline
-at create "Offline issue" -p 1 -t task
-at list  # Shows the issue
+bor daemon start &
+bor init --repo owner/name --offline
+bor create "Offline issue" -p 1 -t task
+bor list  # Shows the issue
 # Restore network, wait for sync
 # Issue appears on GitHub
 ```

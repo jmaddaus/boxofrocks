@@ -7,7 +7,7 @@ import (
 
 func runClose(args []string, gf globalFlags) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: at close <id>")
+		return fmt.Errorf("usage: bor close <id>")
 	}
 
 	id, err := strconv.Atoi(args[0])

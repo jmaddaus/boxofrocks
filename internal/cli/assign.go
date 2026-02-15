@@ -7,7 +7,7 @@ import (
 
 func runAssign(args []string, gf globalFlags) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: at assign <id> <owner>")
+		return fmt.Errorf("usage: bor assign <id> <owner>")
 	}
 
 	id, err := strconv.Atoi(args[0])
