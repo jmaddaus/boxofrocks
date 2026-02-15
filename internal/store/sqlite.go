@@ -68,21 +68,21 @@ func (s *SQLiteStore) AddRepo(ctx context.Context, owner, name string) (*model.R
 
 func (s *SQLiteStore) GetRepo(ctx context.Context, id int) (*model.RepoConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, created_at
+		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, created_at
 		 FROM repos WHERE id = ?`, id)
 	return scanRepo(row)
 }
 
 func (s *SQLiteStore) GetRepoByName(ctx context.Context, owner, name string) (*model.RepoConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, created_at
+		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, created_at
 		 FROM repos WHERE owner = ? AND name = ?`, owner, name)
 	return scanRepo(row)
 }
 
 func (s *SQLiteStore) ListRepos(ctx context.Context) ([]*model.RepoConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, created_at
+		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, created_at
 		 FROM repos ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -107,9 +107,9 @@ func (s *SQLiteStore) UpdateRepo(ctx context.Context, repo *model.RepoConfig) er
 		lastSync = &t
 	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE repos SET owner=?, name=?, poll_interval_ms=?, last_sync_at=?, issues_etag=?
+		`UPDATE repos SET owner=?, name=?, poll_interval_ms=?, last_sync_at=?, issues_etag=?, issues_since=?
 		 WHERE id=?`,
-		repo.Owner, repo.Name, repo.PollIntervalMs, lastSync, repo.IssuesETag, repo.ID)
+		repo.Owner, repo.Name, repo.PollIntervalMs, lastSync, repo.IssuesETag, repo.IssuesSince, repo.ID)
 	return err
 }
 
@@ -392,7 +392,7 @@ func scanRepo(row scanner) (*model.RepoConfig, error) {
 	var r model.RepoConfig
 	var lastSync sql.NullString
 	var createdAt string
-	err := row.Scan(&r.ID, &r.Owner, &r.Name, &r.PollIntervalMs, &lastSync, &r.IssuesETag, &createdAt)
+	err := row.Scan(&r.ID, &r.Owner, &r.Name, &r.PollIntervalMs, &lastSync, &r.IssuesETag, &r.IssuesSince, &createdAt)
 	if err != nil {
 		return nil, err
 	}
