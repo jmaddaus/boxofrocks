@@ -22,6 +22,7 @@ Commands:
   update     Update an issue
   next       Get the next issue to work on
   assign     Assign an issue
+  db         Database migration tools (version, check, downgrade)
   help       Show this help
   version    Show version
 
@@ -127,6 +128,8 @@ func Run(args []string, version string) error {
 		return runNext(subArgs, gf)
 	case "assign":
 		return runAssign(subArgs, gf)
+	case "db":
+		return runDB(subArgs, gf)
 	default:
 		return fmt.Errorf("unknown command: %s\nRun 'bor help' for usage", strings.TrimSpace(cmd))
 	}

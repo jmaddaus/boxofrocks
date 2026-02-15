@@ -13,7 +13,10 @@ import (
 	"github.com/jmaddaus/boxofrocks/internal/model"
 )
 
+var version = "dev"
+
 func main() {
+	log.Printf("reconcile version %s", version)
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
 		log.Fatal("GITHUB_TOKEN is required")

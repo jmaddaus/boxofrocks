@@ -12,11 +12,14 @@ runs:
       run: |
         REF="${GITHUB_ACTION_REF:-latest}"
         if [[ "$REF" == v* ]]; then
-          URL="https://github.com/jmaddaus/boxofrocks/releases/download/${REF}/reconcile-linux-amd64"
+          BASE_URL="https://github.com/jmaddaus/boxofrocks/releases/download/${REF}"
         else
-          URL="https://github.com/jmaddaus/boxofrocks/releases/latest/download/reconcile-linux-amd64"
+          BASE_URL="https://github.com/jmaddaus/boxofrocks/releases/latest/download"
         fi
-        curl -sL "$URL" -o /tmp/reconcile
+        curl --fail -sL "$BASE_URL/reconcile-linux-amd64" -o /tmp/reconcile-linux-amd64
+        curl --fail -sL "$BASE_URL/checksums.txt" -o /tmp/checksums.txt
+        cd /tmp && grep reconcile-linux-amd64 checksums.txt | sha256sum --check
+        mv /tmp/reconcile-linux-amd64 /tmp/reconcile
         chmod +x /tmp/reconcile
     - name: Run reconciliation
       shell: bash
