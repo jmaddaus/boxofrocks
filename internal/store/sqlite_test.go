@@ -147,6 +147,32 @@ func TestUpdateRepo(t *testing.T) {
 	}
 }
 
+func TestUpdateRepoIssuesSince(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	repo := addTestRepo(t, s, "octocat", "hello-world")
+
+	// Initially empty.
+	if repo.IssuesSince != "" {
+		t.Errorf("expected empty IssuesSince, got %q", repo.IssuesSince)
+	}
+
+	// Set IssuesSince and update.
+	repo.IssuesSince = "2024-06-15T12:00:00Z"
+	if err := s.UpdateRepo(ctx, repo); err != nil {
+		t.Fatalf("UpdateRepo: %v", err)
+	}
+
+	// Read back.
+	got, err := s.GetRepo(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if got.IssuesSince != "2024-06-15T12:00:00Z" {
+		t.Errorf("IssuesSince: want 2024-06-15T12:00:00Z, got %s", got.IssuesSince)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Issue tests
 // ---------------------------------------------------------------------------

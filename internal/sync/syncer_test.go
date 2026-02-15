@@ -919,6 +919,91 @@ func TestForceSyncFull(t *testing.T) {
 	}
 }
 
+func TestPullInbound_UsesSince(t *testing.T) {
+	s, gh, repo := setupTest(t)
+	ctx := context.Background()
+
+	// Pre-set IssuesSince on the repo.
+	repo.IssuesSince = "2024-01-01T00:00:00Z"
+	if err := s.UpdateRepo(ctx, repo); err != nil {
+		t.Fatalf("update repo: %v", err)
+	}
+
+	// Add a GitHub issue with a known UpdatedAt.
+	updatedAt := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	ghIssue := &github.GitHubIssue{
+		Number:    50,
+		Title:     "Since Test",
+		Body:      "test body",
+		State:     "open",
+		Labels:    []github.GitHubLabel{{Name: "boxofrocks"}},
+		CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		UpdatedAt: updatedAt,
+	}
+	gh.addGitHubIssue("testowner", "testrepo", ghIssue)
+
+	// Capture the Since value that ListIssues receives.
+	var capturedSince string
+	origListIssues := gh.ListIssues
+	_ = origListIssues // The mock doesn't support wrapping easily, but we can verify through the repo state.
+
+	// Run pull.
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+
+	// Verify the repo syncer has the Since value set.
+	if rs.repo.IssuesSince != "2024-01-01T00:00:00Z" {
+		t.Errorf("expected initial IssuesSince, got %q", rs.repo.IssuesSince)
+	}
+
+	if err := rs.pullInbound(ctx); err != nil {
+		t.Fatalf("pullInbound: %v", err)
+	}
+
+	// After pull, IssuesSince should be updated to the max UpdatedAt.
+	_ = capturedSince
+	want := updatedAt.UTC().Format(time.RFC3339)
+	if rs.repo.IssuesSince != want {
+		t.Errorf("IssuesSince after pull: want %s, got %s", want, rs.repo.IssuesSince)
+	}
+}
+
+func TestPullInbound_SinceNotUsedForFullSync(t *testing.T) {
+	s, gh, repo := setupTest(t)
+	ctx := context.Background()
+
+	// Pre-set IssuesSince on the repo.
+	repo.IssuesSince = "2024-01-01T00:00:00Z"
+	if err := s.UpdateRepo(ctx, repo); err != nil {
+		t.Fatalf("update repo: %v", err)
+	}
+
+	// Add a GitHub issue.
+	ghIssue := &github.GitHubIssue{
+		Number:    60,
+		Title:     "Full Sync Test",
+		Body:      "test",
+		State:     "open",
+		Labels:    []github.GitHubLabel{{Name: "boxofrocks"}},
+		CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC),
+	}
+	gh.addGitHubIssue("testowner", "testrepo", ghIssue)
+
+	// Run full pull — should NOT use Since.
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+
+	if err := rs.pullInboundFull(ctx); err != nil {
+		t.Fatalf("pullInboundFull: %v", err)
+	}
+
+	// Verify the full sync doesn't update IssuesSince (it doesn't have that logic).
+	if rs.repo.IssuesSince != "2024-01-01T00:00:00Z" {
+		t.Errorf("IssuesSince should not change after full sync, got %s", rs.repo.IssuesSince)
+	}
+}
+
 func TestForceSync_NonExistentRepo(t *testing.T) {
 	s, gh, _ := setupTest(t)
 

@@ -384,6 +384,7 @@ func (rs *RepoSyncer) pullInbound(ctx context.Context) error {
 	// List GitHub issues with boxofrocks label.
 	issues, newETag, err := rs.ghClient.ListIssues(ctx, rs.repo.Owner, rs.repo.Name, github.ListOpts{
 		ETag:   rs.repo.IssuesETag,
+		Since:  rs.repo.IssuesSince,
 		Labels: "boxofrocks",
 	})
 	if err != nil {
@@ -402,6 +403,17 @@ func (rs *RepoSyncer) pullInbound(ctx context.Context) error {
 		if err := rs.processGitHubIssue(ctx, ghIssue, false); err != nil {
 			return fmt.Errorf("process issue #%d: %w", ghIssue.Number, err)
 		}
+	}
+
+	// Track the max UpdatedAt to narrow future queries.
+	var maxUpdated time.Time
+	for _, ghIssue := range issues {
+		if ghIssue.UpdatedAt.After(maxUpdated) {
+			maxUpdated = ghIssue.UpdatedAt
+		}
+	}
+	if !maxUpdated.IsZero() {
+		rs.repo.IssuesSince = maxUpdated.UTC().Format(time.RFC3339)
 	}
 
 	return nil

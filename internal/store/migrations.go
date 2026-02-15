@@ -1,6 +1,19 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"strings"
+)
+
+// alterColumn runs an ALTER TABLE ADD COLUMN and silently ignores
+// "duplicate column name" errors, making the migration idempotent.
+func alterColumn(db *sql.DB, stmt string) error {
+	_, err := db.Exec(stmt)
+	if err != nil && strings.Contains(err.Error(), "duplicate column name") {
+		return nil
+	}
+	return err
+}
 
 // migrations is an ordered list of SQL statements applied to the database.
 // Each statement is idempotent (uses IF NOT EXISTS where possible).
@@ -62,10 +75,21 @@ var migrations = []string{
 	)`,
 }
 
+// alterMigrations are ALTER TABLE statements that are run after the main
+// CREATE TABLE migrations. They use alterColumn to be idempotent.
+var alterMigrations = []string{
+	`ALTER TABLE repos ADD COLUMN issues_since TEXT DEFAULT ''`,
+}
+
 // runMigrations applies all migration statements in order.
 func runMigrations(db *sql.DB) error {
 	for _, m := range migrations {
 		if _, err := db.Exec(m); err != nil {
+			return err
+		}
+	}
+	for _, m := range alterMigrations {
+		if err := alterColumn(db, m); err != nil {
 			return err
 		}
 	}

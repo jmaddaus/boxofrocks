@@ -42,10 +42,30 @@ func main() {
 	client := github.NewClient(token)
 	ctx := context.Background()
 
+	newBody, replayed, err := reconcile(ctx, client, owner, repo, issueNum)
+	if err != nil {
+		log.Fatalf("reconcile: %v", err)
+	}
+	if replayed == nil {
+		return
+	}
+
+	if err := client.UpdateIssueBody(ctx, owner, repo, issueNum, newBody); err != nil {
+		log.Fatalf("update issue body: %v", err)
+	}
+
+	fmt.Printf("reconciled issue #%d: status=%s, priority=%d, owner=%s\n",
+		issueNum, replayed.Status, replayed.Priority, replayed.Owner)
+}
+
+// reconcile fetches comments for the given issue, replays boxofrocks events,
+// and returns the new body and replayed issue state. Returns ("", nil, nil)
+// if there are no events to reconcile.
+func reconcile(ctx context.Context, client github.Client, owner, repo string, issueNum int) (string, *model.Issue, error) {
 	// 1. Fetch all comments (paginated)
 	comments, _, err := client.ListComments(ctx, owner, repo, issueNum, github.ListOpts{PerPage: 100})
 	if err != nil {
-		log.Fatalf("fetch comments: %v", err)
+		return "", nil, fmt.Errorf("fetch comments: %w", err)
 	}
 
 	// 2. Parse boxofrocks events from comments
@@ -64,13 +84,13 @@ func main() {
 
 	if len(events) == 0 {
 		log.Println("no boxofrocks events found, nothing to reconcile")
-		return
+		return "", nil, nil
 	}
 
 	// 3. Replay all events
 	issueMap, err := engine.Replay(events)
 	if err != nil {
-		log.Fatalf("replay: %v", err)
+		return "", nil, fmt.Errorf("replay: %w", err)
 	}
 
 	// Get the replayed issue (there should be exactly one since all events reference the same issue)
@@ -81,18 +101,18 @@ func main() {
 	}
 	if replayed == nil {
 		log.Println("replay produced no issue state")
-		return
+		return "", nil, nil
 	}
 
 	// 4. Fetch current issue body to preserve human text
 	ghIssue, err := client.GetIssue(ctx, owner, repo, issueNum)
 	if err != nil {
-		log.Fatalf("get issue: %v", err)
+		return "", nil, fmt.Errorf("get issue: %w", err)
 	}
 
 	_, humanText, err := github.ParseMetadata(ghIssue.Body)
 	if err != nil {
-		log.Fatalf("parse metadata: %v", err)
+		return "", nil, fmt.Errorf("parse metadata: %w", err)
 	}
 
 	// 5. Build metadata and write back
@@ -108,11 +128,5 @@ func main() {
 	}
 
 	newBody := github.RenderBody(humanText, meta)
-
-	if err := client.UpdateIssueBody(ctx, owner, repo, issueNum, newBody); err != nil {
-		log.Fatalf("update issue body: %v", err)
-	}
-
-	fmt.Printf("reconciled issue #%d: status=%s, priority=%d, owner=%s\n",
-		issueNum, replayed.Status, replayed.Priority, replayed.Owner)
+	return newBody, replayed, nil
 }
