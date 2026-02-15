@@ -17,6 +17,10 @@ import (
 // Mock GitHub Client
 // ---------------------------------------------------------------------------
 
+type createLabelRecord struct {
+	Owner, Repo, Name, Color, Description string
+}
+
 type mockGitHubClient struct {
 	mu sync.Mutex
 
@@ -29,6 +33,7 @@ type mockGitHubClient struct {
 	// Track calls for assertions.
 	createdIssues   []createdIssueRecord
 	createdComments []createdCommentRecord
+	createLabelCalls []createLabelRecord
 
 	nextIssueNumber int
 	nextCommentID   int
@@ -196,6 +201,11 @@ func (m *mockGitHubClient) GetIssue(ctx context.Context, owner, repo string, num
 }
 
 func (m *mockGitHubClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.createLabelCalls = append(m.createLabelCalls, createLabelRecord{
+		Owner: owner, Repo: repo, Name: name, Color: color, Description: description,
+	})
 	return nil
 }
 
@@ -1015,5 +1025,54 @@ func TestForceSync_NonExistentRepo(t *testing.T) {
 	}
 	if err := sm.ForceSyncFull(999); err == nil {
 		t.Error("expected error for non-existent repo")
+	}
+}
+
+func TestCycleCreatesLabel(t *testing.T) {
+	s, gh, repo := setupTest(t)
+
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+
+	// Run one cycle.
+	rs.cycle(false)
+
+	gh.mu.Lock()
+	calls := len(gh.createLabelCalls)
+	gh.mu.Unlock()
+
+	if calls != 1 {
+		t.Fatalf("expected 1 CreateLabel call, got %d", calls)
+	}
+
+	gh.mu.Lock()
+	rec := gh.createLabelCalls[0]
+	gh.mu.Unlock()
+
+	if rec.Name != "boxofrocks" {
+		t.Errorf("expected label name 'boxofrocks', got %q", rec.Name)
+	}
+	if rec.Color != "6f42c1" {
+		t.Errorf("expected label color '6f42c1', got %q", rec.Color)
+	}
+}
+
+func TestCycleCreatesLabelOnlyOnce(t *testing.T) {
+	s, gh, repo := setupTest(t)
+
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+
+	// Run three cycles.
+	rs.cycle(false)
+	rs.cycle(false)
+	rs.cycle(false)
+
+	gh.mu.Lock()
+	calls := len(gh.createLabelCalls)
+	gh.mu.Unlock()
+
+	if calls != 1 {
+		t.Fatalf("expected CreateLabel called exactly once across 3 cycles, got %d", calls)
 	}
 }

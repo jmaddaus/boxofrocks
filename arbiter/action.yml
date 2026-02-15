@@ -17,4 +17,5 @@ runs:
       run: /tmp/reconcile
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
         ISSUE_NUMBER: ${{ inputs.issue-number }}

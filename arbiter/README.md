@@ -21,9 +21,13 @@ name: Box of Rocks Reconciler
 on:
   issue_comment:
     types: [created]
+  issues:
+    types: [opened, labeled]
 jobs:
   reconcile:
-    if: startsWith(github.event.comment.body, '[boxofrocks]')
+    if: >
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '[boxofrocks]'))
+      || github.event_name == 'issues'
     runs-on: ubuntu-latest
     steps:
       - uses: jmaddaus/boxofrocks/arbiter@main
@@ -31,7 +35,7 @@ jobs:
           issue-number: ${{ github.event.issue.number }}
 ```
 
-This workflow triggers whenever a new comment is created on an issue. It only runs the reconciliation if the comment starts with the `[boxofrocks]` prefix.
+This workflow triggers when a new boxofrocks comment is created on an issue, or when issues are opened or labeled via the web.
 
 ## Building from Source
 
