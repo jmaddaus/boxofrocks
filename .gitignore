@@ -1,0 +1,13 @@
+# Compiled binaries
+/at
+/reconcile
+reconcile-linux-amd64
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
