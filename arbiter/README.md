@@ -44,7 +44,39 @@ jobs:
 
 This workflow runs every 15 minutes (and on manual dispatch), reconciling all open issues with the `boxofrocks` label. Adjust the cron schedule to match your needs.
 
-The composite action is still available for reconciling a single issue on demand.
+### Event-Driven Reconciliation
+
+For real-time reconciliation, add a second workflow that triggers on `issue_comment` events:
+
+```yaml
+name: Box of Rocks Reconciler (on comment)
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  reconcile:
+    if: contains(github.event.comment.body, '[boxofrocks]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download reconcile binary
+        run: |
+          curl -sL https://github.com/jmaddaus/boxofrocks/releases/latest/download/reconcile-linux-amd64 -o /tmp/reconcile
+          chmod +x /tmp/reconcile
+      - name: Reconcile commented issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: /tmp/reconcile
+```
+
+### When to Use Each Pattern
+
+- **Cron (scheduled):** Periodic audit that catches any missed events or drift. Good as a safety net.
+- **issue_comment (event-driven):** Reconciles a single issue immediately when a boxofrocks event comment is posted. Provides near-instant state updates.
+
+Both workflows can coexist — the cron job acts as a backstop while event-driven reconciliation handles the common case.
 
 ## Version Pinning
 

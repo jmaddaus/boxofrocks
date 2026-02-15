@@ -2,5 +2,9 @@
 bin/
 *.md
 .github/
+.gitignore
 arbiter/
 internal/engine/testdata/
+.idea/
+.vscode/
+.DS_Store
