@@ -260,50 +260,47 @@ func TestReplay_DuplicateCreate(t *testing.T) {
 
 // --- Rules tests ---
 
-func TestValidTransition_AllValid(t *testing.T) {
-	valid := []struct {
-		from model.Status
-		to   model.Status
+func TestFromStatusMatch(t *testing.T) {
+	cases := []struct {
+		name    string
+		current model.Status
+		from    model.Status
+		want    bool
 	}{
-		{model.StatusOpen, model.StatusInProgress},
-		{model.StatusOpen, model.StatusClosed},
-		{model.StatusOpen, model.StatusDeleted},
-		{model.StatusInProgress, model.StatusOpen},
-		{model.StatusInProgress, model.StatusClosed},
-		{model.StatusInProgress, model.StatusDeleted},
-		{model.StatusClosed, model.StatusOpen},
-		{model.StatusClosed, model.StatusDeleted},
+		{"match", model.StatusOpen, model.StatusOpen, true},
+		{"mismatch", model.StatusInProgress, model.StatusOpen, false},
+		{"empty_from_legacy", model.StatusOpen, "", true},
+		{"empty_from_legacy_in_progress", model.StatusInProgress, "", true},
+		{"blocked_match", model.StatusBlocked, model.StatusBlocked, true},
+		{"in_review_match", model.StatusInReview, model.StatusInReview, true},
 	}
-	for _, tc := range valid {
-		t.Run(string(tc.from)+"->"+string(tc.to), func(t *testing.T) {
-			if !ValidTransition(tc.from, tc.to) {
-				t.Errorf("expected %s -> %s to be valid", tc.from, tc.to)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FromStatusMatch(tc.current, tc.from)
+			if got != tc.want {
+				t.Errorf("FromStatusMatch(%q, %q) = %v, want %v", tc.current, tc.from, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestValidTransition_AllInvalid(t *testing.T) {
-	invalid := []struct {
-		from model.Status
-		to   model.Status
+func TestIsTerminal(t *testing.T) {
+	cases := []struct {
+		status model.Status
+		want   bool
 	}{
-		// Self-transitions.
-		{model.StatusOpen, model.StatusOpen},
-		{model.StatusInProgress, model.StatusInProgress},
-		{model.StatusClosed, model.StatusClosed},
-		{model.StatusDeleted, model.StatusDeleted},
-		// Nothing out of deleted.
-		{model.StatusDeleted, model.StatusOpen},
-		{model.StatusDeleted, model.StatusInProgress},
-		{model.StatusDeleted, model.StatusClosed},
-		// Closed cannot go to in_progress directly.
-		{model.StatusClosed, model.StatusInProgress},
+		{model.StatusOpen, false},
+		{model.StatusInProgress, false},
+		{model.StatusBlocked, false},
+		{model.StatusInReview, false},
+		{model.StatusClosed, false},
+		{model.StatusDeleted, true},
 	}
-	for _, tc := range invalid {
-		t.Run(string(tc.from)+"->"+string(tc.to), func(t *testing.T) {
-			if ValidTransition(tc.from, tc.to) {
-				t.Errorf("expected %s -> %s to be invalid", tc.from, tc.to)
+	for _, tc := range cases {
+		t.Run(string(tc.status), func(t *testing.T) {
+			got := IsTerminal(tc.status)
+			if got != tc.want {
+				t.Errorf("IsTerminal(%q) = %v, want %v", tc.status, got, tc.want)
 			}
 		})
 	}
@@ -646,13 +643,178 @@ func TestApply_NilIssueErrors(t *testing.T) {
 	}
 }
 
-// --- ValidTransition with unknown status ---
+// --- From-status validation tests ---
 
-func TestValidTransition_UnknownStatus(t *testing.T) {
-	if ValidTransition(model.Status("nonexistent"), model.StatusOpen) {
-		t.Error("expected false for unknown source status")
+func TestApply_StatusChangeWithFromStatus(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	issue, err := Apply(nil, &model.Event{
+		ID: 1, RepoID: 1, IssueID: 1, Timestamp: ts,
+		Action:  model.ActionCreate,
+		Payload: `{"title":"FromStatus test"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if ValidTransition(model.StatusOpen, model.Status("nonexistent")) {
-		t.Error("expected false for unknown target status")
+
+	// Correct from_status: accepted.
+	issue, err = Apply(issue, &model.Event{
+		ID: 2, RepoID: 1, IssueID: 1, Timestamp: ts.Add(time.Hour),
+		Action:  model.ActionStatusChange,
+		Payload: `{"status":"in_progress","from_status":"open"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	if issue.Status != model.StatusInProgress {
+		t.Errorf("status = %q, want in_progress", issue.Status)
+	}
+
+	// Wrong from_status: skipped.
+	issue, err = Apply(issue, &model.Event{
+		ID: 3, RepoID: 1, IssueID: 1, Timestamp: ts.Add(2 * time.Hour),
+		Action:  model.ActionStatusChange,
+		Payload: `{"status":"closed","from_status":"open"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Status != model.StatusInProgress {
+		t.Errorf("status = %q after stale event, want in_progress (unchanged)", issue.Status)
+	}
+}
+
+func TestApply_StatusChangeWithoutFromStatus_LegacyAccepted(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	issue, err := Apply(nil, &model.Event{
+		ID: 1, RepoID: 1, IssueID: 1, Timestamp: ts,
+		Action:  model.ActionCreate,
+		Payload: `{"title":"Legacy test"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No from_status (legacy): accepted.
+	issue, err = Apply(issue, &model.Event{
+		ID: 2, RepoID: 1, IssueID: 1, Timestamp: ts.Add(time.Hour),
+		Action:  model.ActionStatusChange,
+		Payload: `{"status":"in_progress"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Status != model.StatusInProgress {
+		t.Errorf("status = %q, want in_progress", issue.Status)
+	}
+}
+
+func TestApply_NewStatuses(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	issue, err := Apply(nil, &model.Event{
+		ID: 1, RepoID: 1, IssueID: 1, Timestamp: ts,
+		Action:  model.ActionCreate,
+		Payload: `{"title":"New statuses test"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// open -> blocked
+	issue, err = Apply(issue, &model.Event{
+		ID: 2, RepoID: 1, IssueID: 1, Timestamp: ts.Add(time.Hour),
+		Action:  model.ActionStatusChange,
+		Payload: `{"status":"blocked","from_status":"open"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Status != model.StatusBlocked {
+		t.Errorf("status = %q, want blocked", issue.Status)
+	}
+
+	// blocked -> in_review
+	issue, err = Apply(issue, &model.Event{
+		ID: 3, RepoID: 1, IssueID: 1, Timestamp: ts.Add(2 * time.Hour),
+		Action:  model.ActionStatusChange,
+		Payload: `{"status":"in_review","from_status":"blocked"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Status != model.StatusInReview {
+		t.Errorf("status = %q, want in_review", issue.Status)
+	}
+
+	// in_review -> closed
+	issue, err = Apply(issue, &model.Event{
+		ID: 4, RepoID: 1, IssueID: 1, Timestamp: ts.Add(3 * time.Hour),
+		Action:  model.ActionClose,
+		Payload: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Status != model.StatusClosed {
+		t.Errorf("status = %q, want closed", issue.Status)
+	}
+}
+
+func TestApply_EpicIssueType(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	issue, err := Apply(nil, &model.Event{
+		ID: 1, RepoID: 1, IssueID: 1, Timestamp: ts,
+		Action:  model.ActionCreate,
+		Payload: `{"title":"Epic test","issue_type":"epic"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.IssueType != model.IssueTypeEpic {
+		t.Errorf("issue_type = %q, want epic", issue.IssueType)
+	}
+}
+
+func TestApply_DeletedTerminal_StatusChangeSkipped(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	issue, err := Apply(nil, &model.Event{
+		ID: 1, RepoID: 1, IssueID: 1, Timestamp: ts,
+		Action:  model.ActionCreate,
+		Payload: `{"title":"Terminal test"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issue, err = Apply(issue, &model.Event{
+		ID: 2, RepoID: 1, IssueID: 1, Timestamp: ts.Add(time.Hour),
+		Action:  model.ActionDelete,
+		Payload: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Try status_change on deleted issue with correct from_status — should be skipped.
+	issue, err = Apply(issue, &model.Event{
+		ID: 3, RepoID: 1, IssueID: 1, Timestamp: ts.Add(2 * time.Hour),
+		Action:  model.ActionStatusChange,
+		Payload: `{"status":"open","from_status":"deleted"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Status != model.StatusDeleted {
+		t.Errorf("status = %q, want deleted (terminal, should block all changes)", issue.Status)
+	}
+}
+
+// --- Legacy fixture test ---
+
+func TestReplay_LegacyNoFromStatus(t *testing.T) {
+	runFixture(t, "legacy_no_from_status.json")
 }

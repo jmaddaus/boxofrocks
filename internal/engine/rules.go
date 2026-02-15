@@ -2,31 +2,13 @@ package engine
 
 import "github.com/jmaddaus/boxofrocks/internal/model"
 
-// transitions defines the set of allowed status transitions.
-// Each key is a source status, and the value is the set of valid target statuses.
-var transitions = map[model.Status]map[model.Status]bool{
-	model.StatusOpen: {
-		model.StatusInProgress: true,
-		model.StatusClosed:     true,
-		model.StatusDeleted:    true,
-	},
-	model.StatusInProgress: {
-		model.StatusOpen:    true,
-		model.StatusClosed:  true,
-		model.StatusDeleted: true,
-	},
-	model.StatusClosed: {
-		model.StatusOpen:    true,
-		model.StatusDeleted: true,
-	},
-	model.StatusDeleted: {},
+// IsTerminal returns true if the status is a terminal state (no further transitions allowed).
+func IsTerminal(s model.Status) bool {
+	return s == model.StatusDeleted
 }
 
-// ValidTransition returns true if the status change from -> to is allowed.
-func ValidTransition(from, to model.Status) bool {
-	targets, ok := transitions[from]
-	if !ok {
-		return false
-	}
-	return targets[to]
+// FromStatusMatch returns true if the event's from_status matches the current status.
+// An empty from_status (legacy events) is always accepted.
+func FromStatusMatch(current, from model.Status) bool {
+	return from == "" || from == current
 }

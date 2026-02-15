@@ -8,7 +8,7 @@ import (
 
 func runUpdate(args []string, gf globalFlags) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
-	status := fs.String("status", "", "New status (open, in_progress, closed)")
+	status := fs.String("status", "", "New status (open, in_progress, blocked, in_review, closed)")
 	priority := fs.Int("priority", -1, "New priority")
 	title := fs.String("title", "", "New title")
 	description := fs.String("description", "", "New description")

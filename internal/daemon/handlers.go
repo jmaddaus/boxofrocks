@@ -457,7 +457,8 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 
 		payload := model.EventPayload{
-			Status: newStatus,
+			Status:     newStatus,
+			FromStatus: issue.Status,
 		}
 		payloadJSON, _ := json.Marshal(payload)
 
@@ -556,12 +557,17 @@ func (d *Daemon) deleteIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Append a delete event.
+	deletePayload := model.EventPayload{
+		FromStatus: issue.Status,
+	}
+	deletePayloadJSON, _ := json.Marshal(deletePayload)
+
 	event := &model.Event{
 		RepoID:    issue.RepoID,
 		IssueID:   issue.ID,
 		Timestamp: now,
 		Action:    model.ActionDelete,
-		Payload:   "{}",
+		Payload:   string(deletePayloadJSON),
 		Synced:    0,
 	}
 

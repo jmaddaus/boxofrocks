@@ -8,7 +8,7 @@ import (
 func runCreate(args []string, gf globalFlags) error {
 	fs := flag.NewFlagSet("create", flag.ContinueOnError)
 	priority := fs.Int("p", 0, "Priority (lower is higher priority)")
-	issueType := fs.String("t", "task", "Issue type (task, bug, feature)")
+	issueType := fs.String("t", "task", "Issue type (task, bug, feature, epic)")
 	description := fs.String("d", "", "Description")
 
 	if err := fs.Parse(args); err != nil {

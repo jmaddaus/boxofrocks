@@ -668,6 +668,73 @@ func TestAddRepoStartsSyncer(t *testing.T) {
 	}
 }
 
+func TestUpdateIssueStatusToBlocked(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+	rr := doRequest(t, d, "POST", "/issues", map[string]interface{}{
+		"title": "Blocked Test",
+	})
+	var iss model.Issue
+	decodeJSON(t, rr, &iss)
+
+	rr = doRequest(t, d, "PATCH", "/issues/"+itoa(iss.ID), map[string]interface{}{
+		"status": "blocked",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update to blocked: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var updated model.Issue
+	decodeJSON(t, rr, &updated)
+	if updated.Status != model.StatusBlocked {
+		t.Errorf("expected blocked, got %q", updated.Status)
+	}
+}
+
+func TestUpdateIssueStatusToInReview(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+	rr := doRequest(t, d, "POST", "/issues", map[string]interface{}{
+		"title": "InReview Test",
+	})
+	var iss model.Issue
+	decodeJSON(t, rr, &iss)
+
+	rr = doRequest(t, d, "PATCH", "/issues/"+itoa(iss.ID), map[string]interface{}{
+		"status": "in_review",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update to in_review: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var updated model.Issue
+	decodeJSON(t, rr, &updated)
+	if updated.Status != model.StatusInReview {
+		t.Errorf("expected in_review, got %q", updated.Status)
+	}
+}
+
+func TestCreateIssueWithEpicType(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+	rr := doRequest(t, d, "POST", "/issues", map[string]interface{}{
+		"title":      "Epic Test",
+		"issue_type": "epic",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create epic: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var iss model.Issue
+	decodeJSON(t, rr, &iss)
+	if iss.IssueType != model.IssueTypeEpic {
+		t.Errorf("expected epic, got %q", iss.IssueType)
+	}
+}
+
 func TestAddRepoWithoutSyncManager(t *testing.T) {
 	d := testDaemon(t) // syncMgr is nil
 

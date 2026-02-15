@@ -70,16 +70,14 @@ All issue-mutation handlers follow this pattern:
 5. Persist to store
 6. Return JSON response
 
-### State Transitions (engine/rules.go)
+### From-Status Validation (engine/rules.go)
 
-```
-open → in_progress, closed, deleted
-in_progress → open, closed, deleted
-closed → open (reopen), deleted
-deleted → (terminal)
-```
+Status change events include a `from_status` field declaring the expected current state. The engine skips stale events where `from_status` doesn't match the current computed state. Events without `from_status` (legacy) are always accepted. The `deleted` status is terminal — no further status changes are allowed.
 
-Invalid transitions are silently ignored during replay (not errors). This is intentional for forward compatibility and conflict resolution.
+**Statuses:** `open`, `in_progress`, `blocked`, `in_review`, `closed`, `deleted`
+**Issue types:** `task`, `bug`, `feature`, `epic`
+
+Stale/skipped events are silently ignored during replay (not errors). This is intentional for forward compatibility, conflict resolution, and race condition handling between agents.
 
 ### Sync Flow (sync/syncer.go)
 
@@ -118,7 +116,7 @@ Each `RepoSyncer` poll cycle:
 1. Add the `Action` constant to `internal/model/event.go`
 2. Add an `apply*` function in `internal/engine/engine.go`
 3. Add the case to the `Apply()` switch
-4. If it involves a status change, update the transition map in `internal/engine/rules.go`
+4. If it involves a new terminal status, update `IsTerminal()` in `internal/engine/rules.go`
 5. Add a test case in `internal/engine/engine_test.go`
 6. Add a fixture to `internal/engine/testdata/` if the scenario is complex
 7. Wire the action into the appropriate handler in `internal/daemon/handlers.go`

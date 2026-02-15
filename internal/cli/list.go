@@ -8,7 +8,7 @@ import (
 func runList(args []string, gf globalFlags) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	all := fs.Bool("all", false, "Include deleted issues")
-	status := fs.String("status", "", "Filter by status (open, in_progress, closed, deleted)")
+	status := fs.String("status", "", "Filter by status (open, in_progress, blocked, in_review, closed, deleted)")
 	priority := fs.String("priority", "", "Filter by priority")
 
 	if err := fs.Parse(args); err != nil {
