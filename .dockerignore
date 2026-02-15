@@ -1,0 +1,6 @@
+.git/
+bin/
+*.md
+.github/
+arbiter/
+internal/engine/testdata/
