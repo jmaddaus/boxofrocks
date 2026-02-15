@@ -2,8 +2,13 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 )
+
+// DBSchemaVersion is the current database schema version.
+// Bump this when adding migrations that change the schema.
+const DBSchemaVersion = 1
 
 // alterColumn runs an ALTER TABLE ADD COLUMN and silently ignores
 // "duplicate column name" errors, making the migration idempotent.
@@ -82,7 +87,20 @@ var alterMigrations = []string{
 }
 
 // runMigrations applies all migration statements in order.
+// It checks the database schema version and refuses to proceed if the
+// database was created by a newer binary (to prevent data corruption
+// on rollback).
 func runMigrations(db *sql.DB) error {
+	var dbVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&dbVersion); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if dbVersion > DBSchemaVersion {
+		return fmt.Errorf(
+			"database schema version %d is newer than this binary supports (max %d); upgrade the binary or use a different database",
+			dbVersion, DBSchemaVersion)
+	}
+
 	for _, m := range migrations {
 		if _, err := db.Exec(m); err != nil {
 			return err
@@ -93,5 +111,12 @@ func runMigrations(db *sql.DB) error {
 			return err
 		}
 	}
+
+	if dbVersion < DBSchemaVersion {
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", DBSchemaVersion)); err != nil {
+			return fmt.Errorf("set schema version: %w", err)
+		}
+	}
+
 	return nil
 }

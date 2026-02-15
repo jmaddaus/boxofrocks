@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -850,5 +852,43 @@ func TestEventWithNilOptionalFields(t *testing.T) {
 	}
 	if evt.GitHubIssueNumber != nil {
 		t.Error("expected nil GitHubIssueNumber")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Schema version guard
+// ---------------------------------------------------------------------------
+
+func TestDBSchemaVersionIsSet(t *testing.T) {
+	s := newTestStore(t)
+
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("query user_version: %v", err)
+	}
+	if version != DBSchemaVersion {
+		t.Errorf("expected user_version %d, got %d", DBSchemaVersion, version)
+	}
+}
+
+func TestDBSchemaVersionRejectsNewerDB(t *testing.T) {
+	// Open a DB and set its version higher than what the binary supports.
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+
+	futureVersion := DBSchemaVersion + 1
+	if _, err := db.Exec("PRAGMA user_version = " + fmt.Sprintf("%d", futureVersion)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+
+	err = runMigrations(db)
+	if err == nil {
+		t.Fatal("expected error for newer schema version, got nil")
+	}
+	if !strings.Contains(err.Error(), "newer than this binary supports") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
