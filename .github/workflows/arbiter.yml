@@ -13,7 +13,7 @@
       if: contains(github.event.comment.body, 'boxofrocks')
       runs-on: ubuntu-latest
       steps:
-        - uses: jmaddaus/boxofrocks/arbiter@v3.0.0
+        - uses: jmaddaus/boxofrocks/arbiter@v3
           with:
             issue-number: ${{ github.event.issue.number }}
           env:
