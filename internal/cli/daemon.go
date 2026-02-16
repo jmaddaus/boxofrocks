@@ -129,7 +129,7 @@ func runDaemonBackground(gf globalFlags) error {
 	cmd := exec.Command(executable, "daemon", "start", "--foreground")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
