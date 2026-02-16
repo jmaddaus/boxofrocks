@@ -9,7 +9,7 @@ A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: 
 go build -o bor ./cmd/bor
 
 # Initialize a repo (auto-starts daemon in background)
-bor init --repo owner/name
+bor init --socket
 
 # Create and manage issues
 bor create "Fix login bug" -p 1 -t bug -d "Users can't log in with SSO"
@@ -91,7 +91,7 @@ bor logout                 # Remove stored token
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--host URL` | Daemon URL | `$TRACKER_HOST` or `http://127.0.0.1:8042` |
-| `--repo NAME` | Repository `owner/name` | Auto-detected from git remote |
+| `-r`, `--repo NAME` | Repository `owner/name` | Auto-detected from git remote or working directory |
 | `--pretty` | Human-readable output | JSON output |
 
 ### Commands
@@ -120,9 +120,9 @@ Authenticate with GitHub. Validates the token and saves it to `~/.boxofrocks/tok
 
 Remove the stored GitHub token.
 
-#### `bor init [--repo owner/name] [--offline]`
+#### `bor init [--repo owner/name] [--socket] [--offline]`
 
-Initialize a repository. Auto-starts the daemon if not running, checks auth, registers the repo, and triggers initial sync. Use `--offline` to skip sync.
+Initialize a repository. Auto-starts the daemon if not running, checks auth, registers the repo, and triggers initial sync. Use `--socket` to enable a Unix domain socket at `.boxofrocks/bor.sock` for sandbox agent access. Use `--offline` to skip sync.
 
 #### `bor create "title" [-p priority] [-t type] [-d description]`
 
@@ -156,22 +156,43 @@ Add a comment to an issue.
 
 Toggle trusted author filtering for a repo. When enabled, inbound sync only applies GitHub comments from trusted authors (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR). Comments from untrusted users (NONE, FIRST_TIMER, FIRST_TIME_CONTRIBUTOR) are silently skipped.
 
-This is auto-enabled for public repos during `bor init`. Use `--repo` to target a specific repo.
+This is auto-enabled for public repos during `bor init`. Use `-r` to target a specific repo.
 
 ## Multi-Repo Support
 
-The daemon manages multiple repositories on one machine. When multiple repos are registered, specify which repo to target:
+The daemon manages multiple repositories on one machine. Repo resolution uses this priority chain:
+
+1. **Explicit flag:** `-r owner/name` or `--repo owner/name`
+2. **Working directory:** CLI sends cwd automatically; daemon matches against registered repos' local paths
+3. **Git remote:** auto-detected from `git remote get-url origin`
+4. **Single-repo fallback:** if only one repo is registered, it is used implicitly
+
+In practice, if you initialized with `bor init --socket` (which stores the local path), running any `bor` command from inside that repo directory just works:
 
 ```bash
-bor --repo owner/repo1 list
-bor --repo owner/repo2 create "New issue"
-```
+cd ~/projects/repo1
+bor list                    # resolves via working directory
 
-If only one repo is registered, it is used implicitly.
+bor -r owner/repo2 list    # explicit override
+```
 
 ## Docker / Sandbox Usage
 
-When running CLI commands from inside a Docker container while the daemon runs on the host:
+When the agent runs inside a container or sandbox, the daemon on the host is not reachable at `localhost`. Two options:
+
+**Unix socket (recommended):** Initialize with `--socket` and agents use `curl` over the mounted socket — no network access or binary installation required:
+
+```bash
+# On host:
+bor init --socket
+
+# In sandbox (repo directory is mounted):
+curl -s --unix-socket .boxofrocks/bor.sock http://l/issues/next
+```
+
+See [docs/agent-instructions/](docs/agent-instructions/) for drop-in templates.
+
+**TCP via TRACKER_HOST (legacy):** Set the `TRACKER_HOST` environment variable:
 
 ```bash
 export TRACKER_HOST=http://host.docker.internal:8042

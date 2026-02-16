@@ -22,11 +22,11 @@ go test -run TestName ./internal/store/  # Run a specific test in a specific pac
 ## Architecture
 
 ```
-CLI ──HTTP──> Daemon ──> SQLite       (local, instant)
-                │
-                └──sync──> GitHub Issues  (remote, background)
-                               │
-                     GitHub Action (arbiter)
+CLI ──HTTP/TCP──> Daemon ──> SQLite       (local, instant)
+Agent ──unix sock─┘   │
+                      └──sync──> GitHub Issues  (remote, background)
+                                     │
+                           GitHub Action (arbiter)
 ```
 
 ### Package Dependency Graph
@@ -47,7 +47,7 @@ model ← (used by all packages)
 | `internal/engine` | Pure-logic event replay (`Replay`, `Apply`) | Yes (21) |
 | `internal/github` | GitHub REST API client, auth, body/comment parser, `IsTrustedAuthor` | Yes (37) |
 | `internal/sync` | `SyncManager` + per-repo `RepoSyncer` goroutines, trusted-author filtering | Yes (17) |
-| `internal/daemon` | HTTP server, routes, handlers, middleware | Yes (23) |
+| `internal/daemon` | HTTP server, routes, handlers, middleware, Unix socket lifecycle | Yes (25) |
 | `internal/cli` | CLI commands, HTTP client to daemon, output formatting | No |
 | `internal/config` | `~/.boxofrocks/config.json` management | No |
 | `arbiter/cmd/reconcile` | Standalone binary for GitHub Action | No |
@@ -137,7 +137,7 @@ Force sync always resets to fast tier. The `SyncStatus.Idle` field reports wheth
 2. Add the case to the switch in `internal/cli/root.go` `Run()`
 3. Add it to the `usage` string in `root.go`
 4. Use `newClient(gf)` to get the daemon HTTP client
-5. Use `resolveRepo(gf)` for repo resolution
+5. Use `resolveRepo(gf)` for repo resolution (CLI-side; daemon resolves via the 5-step chain above)
 6. Use `printIssue()` / `printIssueList()` / `printJSON()` for output
 
 ## Adding a New REST Endpoint
@@ -155,6 +155,23 @@ Default config at `~/.boxofrocks/config.json`:
 ```
 
 `TRACKER_HOST` env var overrides the daemon URL (default `http://127.0.0.1:8042`). Used for Docker containers pointing at `host.docker.internal`.
+
+### Unix Domain Sockets
+
+`bor init --socket` stores the repo's local path and enables a Unix domain socket at `.boxofrocks/bor.sock`. This allows sandbox agents to communicate with the daemon via `curl --unix-socket` without network access or binary installation.
+
+**Repo resolution chain** (`resolveRepo` in `daemon/handlers.go`):
+1. `?repo=` query param
+2. `X-Repo` header
+3. Socket association — `ConnContext` injects repo ID for Unix socket connections
+4. `X-Working-Dir` header — CLI sends cwd automatically, daemon matches against `RepoConfig.LocalPath` (longest prefix)
+5. Single-repo implicit fallback
+
+**Socket lifecycle** (in `daemon/daemon.go`):
+- `CreateSocketForRepo()` — creates `.boxofrocks/` dir, removes stale socket, listens, spawns `server.Serve(ln)` goroutine
+- `startRepoSockets()` — called in `Run()` after PID file, iterates repos with `SocketEnabled=true`
+- `cleanupSockets()` — removes socket files on shutdown
+- `socketRepos map[string]int` — maps socket path to repo ID for `ConnContext` lookup
 
 ## Auth Chain
 

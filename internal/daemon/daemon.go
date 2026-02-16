@@ -12,14 +12,22 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	stdsync "sync"
 	"syscall"
 	"time"
 
 	"github.com/jmaddaus/boxofrocks/internal/config"
 	"github.com/jmaddaus/boxofrocks/internal/github"
+	"github.com/jmaddaus/boxofrocks/internal/model"
 	"github.com/jmaddaus/boxofrocks/internal/store"
 	"github.com/jmaddaus/boxofrocks/internal/sync"
 )
+
+// contextKey is a private type for context keys in this package.
+type contextKey string
+
+// socketRepoIDKey is the context key for the repo ID resolved from a Unix socket connection.
+const socketRepoIDKey contextKey = "socketRepoID"
 
 // Daemon manages the HTTP server and its dependencies.
 type Daemon struct {
@@ -29,6 +37,10 @@ type Daemon struct {
 	syncMgr   *sync.SyncManager
 	server    *http.Server
 	startedAt time.Time
+
+	socketMu    stdsync.Mutex
+	socketLns   map[string]net.Listener // sockPath → listener
+	socketRepos map[string]int          // sockPath → repoID
 }
 
 // New creates a new Daemon, opening the SQLite store and setting up the HTTP server.
@@ -43,8 +55,10 @@ func New(cfg *config.Config) (*Daemon, error) {
 	}
 
 	d := &Daemon{
-		cfg:   cfg,
-		store: s,
+		cfg:         cfg,
+		store:       s,
+		socketLns:   make(map[string]net.Listener),
+		socketRepos: make(map[string]int),
 	}
 
 	mux := d.registerRoutes()
@@ -56,6 +70,7 @@ func New(cfg *config.Config) (*Daemon, error) {
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
+		ConnContext:  d.connContext,
 	}
 
 	return d, nil
@@ -70,9 +85,11 @@ func NewWithStore(cfg *config.Config, s store.Store) *Daemon {
 // This is used by the CLI daemon start command to pass in a fully-wired SyncManager.
 func NewWithStoreAndSync(cfg *config.Config, s store.Store, sm *sync.SyncManager, gh ...github.Client) *Daemon {
 	d := &Daemon{
-		cfg:     cfg,
-		store:   s,
-		syncMgr: sm,
+		cfg:         cfg,
+		store:       s,
+		syncMgr:     sm,
+		socketLns:   make(map[string]net.Listener),
+		socketRepos: make(map[string]int),
 	}
 	if len(gh) > 0 {
 		d.ghClient = gh[0]
@@ -82,8 +99,9 @@ func NewWithStoreAndSync(cfg *config.Config, s store.Store, sm *sync.SyncManager
 	handler := d.applyMiddleware(mux)
 
 	d.server = &http.Server{
-		Addr:    cfg.ListenAddr,
-		Handler: handler,
+		Addr:        cfg.ListenAddr,
+		Handler:     handler,
+		ConnContext: d.connContext,
 	}
 
 	return d
@@ -135,6 +153,111 @@ func removePIDFile(cfg *config.Config) {
 	os.Remove(PIDFilePath(cfg))
 }
 
+// connContext is the http.Server.ConnContext hook. For Unix socket connections,
+// it injects the associated repo ID into the request context so that
+// resolveRepo can use it without an explicit ?repo= or X-Repo header.
+func (d *Daemon) connContext(ctx context.Context, c net.Conn) context.Context {
+	if addr, ok := c.LocalAddr().(*net.UnixAddr); ok {
+		d.socketMu.Lock()
+		repoID, exists := d.socketRepos[addr.Name]
+		d.socketMu.Unlock()
+		if exists {
+			return context.WithValue(ctx, socketRepoIDKey, repoID)
+		}
+	}
+	return ctx
+}
+
+// CreateSocketForRepo creates a Unix domain socket listener for the given repo.
+// It is safe to call multiple times for the same repo.
+func (d *Daemon) CreateSocketForRepo(repo *model.RepoConfig) error {
+	sockPath := repo.SocketPath()
+	if sockPath == "" {
+		return nil
+	}
+
+	d.socketMu.Lock()
+	defer d.socketMu.Unlock()
+
+	if _, ok := d.socketLns[sockPath]; ok {
+		return nil // already listening
+	}
+
+	// Ensure the .boxofrocks/ directory exists.
+	sockDir := filepath.Dir(sockPath)
+	if err := os.MkdirAll(sockDir, 0700); err != nil {
+		return fmt.Errorf("create socket dir: %w", err)
+	}
+
+	// Remove stale socket file if present.
+	os.Remove(sockPath)
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		return fmt.Errorf("listen unix %s: %w", sockPath, err)
+	}
+
+	// Set socket permissions to owner-only.
+	if err := os.Chmod(sockPath, 0700); err != nil {
+		ln.Close()
+		os.Remove(sockPath)
+		return fmt.Errorf("chmod socket: %w", err)
+	}
+
+	d.socketLns[sockPath] = ln
+	d.socketRepos[sockPath] = repo.ID
+
+	go func() {
+		if err := d.server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Warn("socket serve error", "path", sockPath, "error", err)
+		}
+	}()
+
+	slog.Info("unix socket listening", "path", sockPath)
+	return nil
+}
+
+// removeSocket closes and removes a single Unix domain socket.
+func (d *Daemon) removeSocket(sockPath string) {
+	d.socketMu.Lock()
+	defer d.socketMu.Unlock()
+
+	if ln, ok := d.socketLns[sockPath]; ok {
+		ln.Close()
+		delete(d.socketLns, sockPath)
+	}
+	delete(d.socketRepos, sockPath)
+	os.Remove(sockPath)
+}
+
+// cleanupSockets removes all socket files from disk.
+func (d *Daemon) cleanupSockets() {
+	d.socketMu.Lock()
+	defer d.socketMu.Unlock()
+
+	for sockPath := range d.socketLns {
+		os.Remove(sockPath)
+	}
+	d.socketLns = make(map[string]net.Listener)
+	d.socketRepos = make(map[string]int)
+}
+
+// startRepoSockets iterates registered repos and creates sockets for those with SocketEnabled.
+func (d *Daemon) startRepoSockets() {
+	repos, err := d.store.ListRepos(context.Background())
+	if err != nil {
+		slog.Warn("could not list repos for socket setup", "error", err)
+		return
+	}
+	for _, repo := range repos {
+		if repo.SocketEnabled && repo.LocalPath != "" {
+			if err := d.CreateSocketForRepo(repo); err != nil {
+				slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+			}
+		}
+	}
+}
+
 // Run starts the HTTP server and blocks until a SIGINT or SIGTERM is received
 // or the provided context is cancelled. It uses split Listen/Serve so the PID
 // file is written only after successful port bind.
@@ -157,6 +280,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("write PID file: %w", err)
 	}
 	defer removePIDFile(d.cfg)
+
+	// Create Unix domain sockets for repos that have them enabled.
+	d.startRepoSockets()
+	defer d.cleanupSockets()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -197,6 +324,9 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	if err := d.server.Shutdown(shutdownCtx); err != nil {
 		firstErr = fmt.Errorf("server shutdown: %w", err)
 	}
+
+	// Remove socket files from disk (listeners already closed by server.Shutdown).
+	d.cleanupSockets()
 
 	if err := d.store.Close(); err != nil {
 		if firstErr == nil {
