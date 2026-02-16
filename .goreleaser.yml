@@ -41,6 +41,7 @@ brews:
     repository:
       owner: jmaddaus
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/jmaddaus/boxofrocks
     description: "CLI issue tracker backed by GitHub Issues"
     install: |
@@ -52,5 +53,6 @@ scoops:
     repository:
       owner: jmaddaus
       name: scoop-bucket
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/jmaddaus/boxofrocks
     description: "CLI issue tracker backed by GitHub Issues"
