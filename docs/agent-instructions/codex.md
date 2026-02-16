@@ -19,4 +19,9 @@ bor close <id>                              # when done
 
 If `bor next` returns nothing, proceed with the user's direct request. If the daemon is not reachable, verify `TRACKER_HOST` is correct. Do not create issues unless the user explicitly asks.
 
-Other useful commands: `bor list [--status S]`, `bor create "title" [-p N] [-t TYPE] [-d D]`, `bor update <id> --status S [--comment C]`. All output is JSON. Statuses: `open`, `in_progress`, `blocked`, `in_review`, `closed`. Types: `task`, `bug`, `feature`, `epic`. Priority: integer, lower = higher.
+Other useful commands:
+- `bor list [--status S]` — list issues, optionally filtered by status
+- `bor create "title" [--priority N] [--type TYPE] [--description "text"]` — create an issue
+- `bor update <id> --status S [--comment "text"]` — update status with optional comment
+
+All output is JSON. Statuses: `open`, `in_progress`, `blocked`, `in_review`, `closed`. Types: `task`, `bug`, `feature`, `epic`. Priority: integer, lower = higher.
