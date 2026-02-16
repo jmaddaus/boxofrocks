@@ -44,7 +44,7 @@ type Daemon struct {
 
 	queueMu    stdsync.Mutex
 	queueStops map[string]chan struct{} // queueDir → stop channel
-	queueRepos map[string]int          // queueDir → repoID
+	queueRepos map[string]int           // queueDir → repoID
 }
 
 // New creates a new Daemon, opening the SQLite store and setting up the HTTP server.
