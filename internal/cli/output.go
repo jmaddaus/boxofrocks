@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/jmaddaus/boxofrocks/internal/model"
 )
@@ -79,6 +80,20 @@ func printPrettyIssue(issue *model.Issue) {
 	fmt.Printf("  Updated:     %s\n", issue.UpdatedAt.Format("2006-01-02 15:04:05"))
 	if issue.ClosedAt != nil {
 		fmt.Printf("  Closed:      %s\n", issue.ClosedAt.Format("2006-01-02 15:04:05"))
+	}
+	if len(issue.Comments) > 0 {
+		fmt.Println("  Comments:")
+		for _, c := range issue.Comments {
+			ts := c.Timestamp
+			if t, err := time.Parse(time.RFC3339, c.Timestamp); err == nil {
+				ts = t.Format("2006-01-02 15:04")
+			}
+			if c.Author != "" {
+				fmt.Printf("    [%s] %s: %s\n", ts, c.Author, c.Text)
+			} else {
+				fmt.Printf("    [%s] %s\n", ts, c.Text)
+			}
+		}
 	}
 }
 

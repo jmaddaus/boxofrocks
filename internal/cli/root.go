@@ -21,6 +21,7 @@ Commands:
   list       List issues
   create     Create an issue
   close      Close an issue
+  comment    Add a comment to an issue
   update     Update an issue
   next       Get the next issue to work on
   assign     Assign an issue
@@ -128,6 +129,8 @@ func Run(args []string, version string) error {
 		return runCreate(subArgs, gf)
 	case "close":
 		return runClose(subArgs, gf)
+	case "comment":
+		return runComment(subArgs, gf)
 	case "update":
 		return runUpdate(subArgs, gf)
 	case "next":

@@ -623,6 +623,9 @@ func (noopGitHubClient) CreateComment(ctx context.Context, owner, repo string, n
 func (noopGitHubClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
 	return nil
 }
+func (noopGitHubClient) UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error {
+	return nil
+}
 func (noopGitHubClient) GetRateLimit() github.RateLimit {
 	return github.RateLimit{Remaining: 5000, Reset: time.Now().Add(time.Hour)}
 }
@@ -733,6 +736,125 @@ func TestCreateIssueWithEpicType(t *testing.T) {
 	decodeJSON(t, rr, &iss)
 	if iss.IssueType != model.IssueTypeEpic {
 		t.Errorf("expected epic, got %q", iss.IssueType)
+	}
+}
+
+func TestCommentIssue(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+	rr := doRequest(t, d, "POST", "/issues", map[string]interface{}{
+		"title": "Comment Test",
+	})
+	var iss model.Issue
+	decodeJSON(t, rr, &iss)
+
+	// Add a comment.
+	rr = doRequest(t, d, "POST", "/issues/"+itoa(iss.ID)+"/comment", map[string]string{
+		"comment": "This is a test comment",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("comment: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var commented model.Issue
+	decodeJSON(t, rr, &commented)
+	if len(commented.Comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(commented.Comments))
+	}
+	if commented.Comments[0].Text != "This is a test comment" {
+		t.Errorf("expected comment text 'This is a test comment', got %q", commented.Comments[0].Text)
+	}
+}
+
+func TestCommentIssueNotFound(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+
+	rr := doRequest(t, d, "POST", "/issues/99999/comment", map[string]string{
+		"comment": "test",
+	})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("comment not found: expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestCommentIssueEmptyComment(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+	rr := doRequest(t, d, "POST", "/issues", map[string]interface{}{
+		"title": "Empty Comment Test",
+	})
+	var iss model.Issue
+	decodeJSON(t, rr, &iss)
+
+	rr = doRequest(t, d, "POST", "/issues/"+itoa(iss.ID)+"/comment", map[string]string{
+		"comment": "",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("empty comment: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUpdateIssueWithComment(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+	rr := doRequest(t, d, "POST", "/issues", map[string]interface{}{
+		"title": "Update Comment Test",
+	})
+	var iss model.Issue
+	decodeJSON(t, rr, &iss)
+
+	// Update with a comment.
+	rr = doRequest(t, d, "PATCH", "/issues/"+itoa(iss.ID), map[string]interface{}{
+		"title":   "New Title",
+		"comment": "Changed the title",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update with comment: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var updated model.Issue
+	decodeJSON(t, rr, &updated)
+	if updated.Title != "New Title" {
+		t.Errorf("expected title 'New Title', got %q", updated.Title)
+	}
+	if len(updated.Comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(updated.Comments))
+	}
+	if updated.Comments[0].Text != "Changed the title" {
+		t.Errorf("expected comment text 'Changed the title', got %q", updated.Comments[0].Text)
+	}
+}
+
+func TestUpdateIssueCommentOnly(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+	rr := doRequest(t, d, "POST", "/issues", map[string]interface{}{
+		"title": "Comment Only Update",
+	})
+	var iss model.Issue
+	decodeJSON(t, rr, &iss)
+
+	// Update with only a comment (no field changes).
+	rr = doRequest(t, d, "PATCH", "/issues/"+itoa(iss.ID), map[string]interface{}{
+		"comment": "Just a note",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("comment-only update: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var updated model.Issue
+	decodeJSON(t, rr, &updated)
+	if len(updated.Comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(updated.Comments))
+	}
+	if updated.Comments[0].Text != "Just a note" {
+		t.Errorf("expected comment text 'Just a note', got %q", updated.Comments[0].Text)
 	}
 }
 

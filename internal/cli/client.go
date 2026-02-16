@@ -228,6 +228,21 @@ func (c *Client) AssignIssue(id int, owner string) (*model.Issue, error) {
 	return &issue, nil
 }
 
+// CommentIssue adds a comment to an issue.
+func (c *Client) CommentIssue(id int, comment string) (*model.Issue, error) {
+	path := fmt.Sprintf("/issues/%d/comment", id)
+	body := map[string]string{"comment": comment}
+	resp, err := c.Do("POST", path, body)
+	if err != nil {
+		return nil, err
+	}
+	var issue model.Issue
+	if err := decodeOrError(resp, &issue); err != nil {
+		return nil, err
+	}
+	return &issue, nil
+}
+
 // NextIssue retrieves the highest-priority open issue for the given repo.
 func (c *Client) NextIssue(repo string) (*model.Issue, error) {
 	path := "/issues/next"

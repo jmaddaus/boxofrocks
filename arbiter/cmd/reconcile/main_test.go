@@ -14,9 +14,10 @@ import (
 
 // mockClient implements github.Client for testing reconcile().
 type mockClient struct {
-	comments []*github.GitHubComment
-	issue    *github.GitHubIssue
-	updated  string // captured body from UpdateIssueBody
+	comments     []*github.GitHubComment
+	issue        *github.GitHubIssue
+	updated      string // captured body from UpdateIssueBody
+	updatedState string // captured state from UpdateIssueState
 }
 
 func (m *mockClient) ListIssues(ctx context.Context, owner, repo string, opts github.ListOpts) ([]*github.GitHubIssue, string, error) {
@@ -48,6 +49,11 @@ func (m *mockClient) CreateComment(ctx context.Context, owner, repo string, numb
 }
 
 func (m *mockClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
+	return nil
+}
+
+func (m *mockClient) UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error {
+	m.updatedState = state
 	return nil
 }
 
@@ -271,5 +277,75 @@ func TestReconcileMultipleEvents(t *testing.T) {
 	}
 	if body == "" {
 		t.Error("expected non-empty body")
+	}
+}
+
+func TestSyncIssueState_CloseWhenClosed(t *testing.T) {
+	mc := &mockClient{}
+	replayed := &model.Issue{Status: model.StatusClosed}
+	ghIssue := &github.GitHubIssue{State: "open"}
+
+	err := syncIssueState(context.Background(), mc, "owner", "repo", 1, replayed, ghIssue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mc.updatedState != "closed" {
+		t.Errorf("expected state 'closed', got %q", mc.updatedState)
+	}
+}
+
+func TestSyncIssueState_CloseWhenDeleted(t *testing.T) {
+	mc := &mockClient{}
+	replayed := &model.Issue{Status: model.StatusDeleted}
+	ghIssue := &github.GitHubIssue{State: "open"}
+
+	err := syncIssueState(context.Background(), mc, "owner", "repo", 1, replayed, ghIssue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mc.updatedState != "closed" {
+		t.Errorf("expected state 'closed', got %q", mc.updatedState)
+	}
+}
+
+func TestSyncIssueState_ReopenWhenOpen(t *testing.T) {
+	mc := &mockClient{}
+	replayed := &model.Issue{Status: model.StatusOpen}
+	ghIssue := &github.GitHubIssue{State: "closed"}
+
+	err := syncIssueState(context.Background(), mc, "owner", "repo", 1, replayed, ghIssue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mc.updatedState != "open" {
+		t.Errorf("expected state 'open', got %q", mc.updatedState)
+	}
+}
+
+func TestSyncIssueState_NoChangeWhenAlreadyMatching(t *testing.T) {
+	mc := &mockClient{}
+	replayed := &model.Issue{Status: model.StatusOpen}
+	ghIssue := &github.GitHubIssue{State: "open"}
+
+	err := syncIssueState(context.Background(), mc, "owner", "repo", 1, replayed, ghIssue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mc.updatedState != "" {
+		t.Errorf("expected no state update, got %q", mc.updatedState)
+	}
+}
+
+func TestSyncIssueState_NoChangeWhenClosedMatching(t *testing.T) {
+	mc := &mockClient{}
+	replayed := &model.Issue{Status: model.StatusClosed}
+	ghIssue := &github.GitHubIssue{State: "closed"}
+
+	err := syncIssueState(context.Background(), mc, "owner", "repo", 1, replayed, ghIssue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mc.updatedState != "" {
+		t.Errorf("expected no state update, got %q", mc.updatedState)
 	}
 }

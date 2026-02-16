@@ -63,6 +63,7 @@ type Client interface {
 	GetIssue(ctx context.Context, owner, repo string, number int) (*GitHubIssue, error)
 	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*GitHubIssue, error)
 	UpdateIssueBody(ctx context.Context, owner, repo string, number int, body string) error
+	UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error
 	ListComments(ctx context.Context, owner, repo string, number int, opts ListOpts) ([]*GitHubComment, string, error)
 	CreateComment(ctx context.Context, owner, repo string, number int, body string) (*GitHubComment, error)
 	CreateLabel(ctx context.Context, owner, repo, name, color, description string) error
@@ -334,6 +335,34 @@ func (c *clientImpl) UpdateIssueBody(ctx context.Context, owner, repo string, nu
 	}
 
 	// Drain and discard the body
+	io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// UpdateIssueState sets the state (open/closed) of an existing issue.
+func (c *clientImpl) UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error {
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d", c.baseURL, owner, repo, number)
+
+	payload := map[string]string{
+		"state": state,
+	}
+
+	req, err := c.newRequest(ctx, http.MethodPatch, url, payload)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.do(req)
+	if err != nil {
+		return fmt.Errorf("update issue state: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update issue state: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	io.Copy(io.Discard, resp.Body)
 	return nil
 }

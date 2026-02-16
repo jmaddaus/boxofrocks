@@ -332,6 +332,7 @@ type createIssueRequest struct {
 	Priority    *int     `json:"priority"`
 	IssueType   string   `json:"issue_type"`
 	Labels      []string `json:"labels"`
+	Comment     string   `json:"comment"`
 }
 
 func (d *Daemon) createIssue(w http.ResponseWriter, r *http.Request) {
@@ -389,6 +390,7 @@ func (d *Daemon) createIssue(w http.ResponseWriter, r *http.Request) {
 		Priority:    req.Priority,
 		IssueType:   req.IssueType,
 		Labels:      req.Labels,
+		Comment:     req.Comment,
 	}
 	payloadJSON, _ := json.Marshal(payload)
 
@@ -416,6 +418,7 @@ type updateIssueRequest struct {
 	Priority    *int     `json:"priority,omitempty"`
 	IssueType   string   `json:"issue_type,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
+	Comment     string   `json:"comment,omitempty"`
 }
 
 func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
@@ -446,7 +449,9 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If status is changing, use a status_change or close event.
+	statusChanged := false
 	if req.Status != "" && model.Status(req.Status) != issue.Status {
+		statusChanged = true
 		newStatus := model.Status(req.Status)
 
 		var action model.Action
@@ -459,6 +464,7 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 		payload := model.EventPayload{
 			Status:     newStatus,
 			FromStatus: issue.Status,
+			Comment:    req.Comment,
 		}
 		payloadJSON, _ := json.Marshal(payload)
 
@@ -487,14 +493,19 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 	// If there are non-status field changes, generate an update event.
 	hasFieldChange := req.Title != "" || req.Description != "" ||
 		req.Priority != nil || req.IssueType != "" || req.Labels != nil
-
 	if hasFieldChange {
+		// If the comment was already attached to a status_change event, don't duplicate it.
+		comment := req.Comment
+		if statusChanged {
+			comment = ""
+		}
 		payload := model.EventPayload{
 			Title:       req.Title,
 			Description: req.Description,
 			Priority:    req.Priority,
 			IssueType:   req.IssueType,
 			Labels:      req.Labels,
+			Comment:     comment,
 		}
 		payloadJSON, _ := json.Marshal(payload)
 
@@ -503,6 +514,35 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 			IssueID:   issue.ID,
 			Timestamp: now,
 			Action:    model.ActionUpdate,
+			Payload:   string(payloadJSON),
+			Synced:    0,
+		}
+
+		savedEvent, err := d.store.AppendEvent(ctx, event)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "append event: "+err.Error())
+			return
+		}
+
+		issue, err = engine.Apply(issue, savedEvent)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "apply event: "+err.Error())
+			return
+		}
+	}
+
+	// If there's a comment but no other changes carried it, generate a standalone comment event.
+	if req.Comment != "" && !hasFieldChange && !statusChanged {
+		payload := model.EventPayload{
+			Comment: req.Comment,
+		}
+		payloadJSON, _ := json.Marshal(payload)
+
+		event := &model.Event{
+			RepoID:    issue.RepoID,
+			IssueID:   issue.ID,
+			Timestamp: now,
+			Action:    model.ActionComment,
 			Payload:   string(payloadJSON),
 			Synced:    0,
 		}
@@ -663,4 +703,83 @@ func (d *Daemon) assignIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, issue)
+}
+
+// ---------------------------------------------------------------------------
+// Comment on issue
+// ---------------------------------------------------------------------------
+
+type commentIssueRequest struct {
+	Comment string `json:"comment"`
+}
+
+func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid issue id")
+		return
+	}
+
+	var req commentIssueRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Comment == "" {
+		writeError(w, http.StatusBadRequest, "comment is required")
+		return
+	}
+
+	ctx := r.Context()
+	now := time.Now().UTC()
+
+	issue, err := d.store.GetIssue(ctx, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	payload := model.EventPayload{
+		Comment: req.Comment,
+	}
+	payloadJSON, _ := json.Marshal(payload)
+
+	event := &model.Event{
+		RepoID:    issue.RepoID,
+		IssueID:   issue.ID,
+		Timestamp: now,
+		Action:    model.ActionComment,
+		Payload:   string(payloadJSON),
+		Synced:    0,
+	}
+
+	savedEvent, err := d.store.AppendEvent(ctx, event)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "append event: "+err.Error())
+		return
+	}
+
+	issue, err = engine.Apply(issue, savedEvent)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "apply event: "+err.Error())
+		return
+	}
+
+	if err := d.store.UpdateIssue(ctx, issue); err != nil {
+		writeError(w, http.StatusInternalServerError, "update issue: "+err.Error())
+		return
+	}
+
+	issue, err = d.store.GetIssue(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, issue)
 }

@@ -209,6 +209,20 @@ func (m *mockGitHubClient) CreateLabel(ctx context.Context, owner, repo, name, c
 	return nil
 }
 
+func (m *mockGitHubClient) UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := m.repoKey(owner, repo)
+	for _, iss := range m.issues[key] {
+		if iss.Number == number {
+			iss.State = state
+			return nil
+		}
+	}
+	return fmt.Errorf("issue %d not found", number)
+}
+
 func (m *mockGitHubClient) GetRateLimit() github.RateLimit {
 	m.mu.Lock()
 	defer m.mu.Unlock()

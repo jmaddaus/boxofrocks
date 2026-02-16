@@ -134,10 +134,17 @@ func (s *SQLiteStore) CreateIssue(ctx context.Context, issue *model.Issue) (*mod
 	if issue.Labels == nil {
 		issue.Labels = []string{}
 	}
+	if issue.Comments == nil {
+		issue.Comments = []model.Comment{}
+	}
 
 	labelsJSON, err := json.Marshal(issue.Labels)
 	if err != nil {
 		return nil, fmt.Errorf("marshal labels: %w", err)
+	}
+	commentsJSON, err := json.Marshal(issue.Comments)
+	if err != nil {
+		return nil, fmt.Errorf("marshal comments: %w", err)
 	}
 
 	var githubID *int
@@ -151,13 +158,13 @@ func (s *SQLiteStore) CreateIssue(ctx context.Context, issue *model.Issue) (*mod
 	}
 
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO issues (repo_id, github_id, title, status, priority, issue_type, description, owner, labels, created_at, updated_at, closed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO issues (repo_id, github_id, title, status, priority, issue_type, description, owner, labels, created_at, updated_at, closed_at, comments)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		issue.RepoID, githubID, issue.Title, string(issue.Status), issue.Priority,
 		string(issue.IssueType), issue.Description, issue.Owner,
 		string(labelsJSON),
 		issue.CreatedAt.Format(time.RFC3339), issue.UpdatedAt.Format(time.RFC3339),
-		closedAt)
+		closedAt, string(commentsJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -167,13 +174,13 @@ func (s *SQLiteStore) CreateIssue(ctx context.Context, issue *model.Issue) (*mod
 
 func (s *SQLiteStore) GetIssue(ctx context.Context, id int) (*model.Issue, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, repo_id, github_id, title, status, priority, issue_type, description, owner, labels, created_at, updated_at, closed_at
+		`SELECT id, repo_id, github_id, title, status, priority, issue_type, description, owner, labels, created_at, updated_at, closed_at, comments
 		 FROM issues WHERE id = ?`, id)
 	return scanIssue(row)
 }
 
 func (s *SQLiteStore) ListIssues(ctx context.Context, filter IssueFilter) ([]*model.Issue, error) {
-	query := `SELECT id, repo_id, github_id, title, status, priority, issue_type, description, owner, labels, created_at, updated_at, closed_at FROM issues WHERE 1=1`
+	query := `SELECT id, repo_id, github_id, title, status, priority, issue_type, description, owner, labels, created_at, updated_at, closed_at, comments FROM issues WHERE 1=1`
 	var args []interface{}
 
 	if filter.RepoID != 0 {
@@ -221,9 +228,16 @@ func (s *SQLiteStore) UpdateIssue(ctx context.Context, issue *model.Issue) error
 	if issue.Labels == nil {
 		issue.Labels = []string{}
 	}
+	if issue.Comments == nil {
+		issue.Comments = []model.Comment{}
+	}
 	labelsJSON, err := json.Marshal(issue.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
+	}
+	commentsJSON, err := json.Marshal(issue.Comments)
+	if err != nil {
+		return fmt.Errorf("marshal comments: %w", err)
 	}
 	var closedAt *string
 	if issue.ClosedAt != nil {
@@ -236,12 +250,13 @@ func (s *SQLiteStore) UpdateIssue(ctx context.Context, issue *model.Issue) error
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE issues SET repo_id=?, github_id=?, title=?, status=?, priority=?, issue_type=?, description=?, owner=?, labels=?, updated_at=?, closed_at=?
+		`UPDATE issues SET repo_id=?, github_id=?, title=?, status=?, priority=?, issue_type=?, description=?, owner=?, labels=?, updated_at=?, closed_at=?, comments=?
 		 WHERE id=?`,
 		issue.RepoID, githubID, issue.Title, string(issue.Status), issue.Priority,
 		string(issue.IssueType), issue.Description, issue.Owner,
 		string(labelsJSON),
 		issue.UpdatedAt.Format(time.RFC3339), closedAt,
+		string(commentsJSON),
 		issue.ID)
 	return err
 }
@@ -255,7 +270,7 @@ func (s *SQLiteStore) DeleteIssue(ctx context.Context, id int) error {
 
 func (s *SQLiteStore) NextIssue(ctx context.Context, repoID int) (*model.Issue, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, repo_id, github_id, title, status, priority, issue_type, description, owner, labels, created_at, updated_at, closed_at
+		`SELECT id, repo_id, github_id, title, status, priority, issue_type, description, owner, labels, created_at, updated_at, closed_at, comments
 		 FROM issues
 		 WHERE repo_id = ? AND status = 'open' AND owner = ''
 		 ORDER BY priority ASC, created_at ASC
@@ -421,13 +436,14 @@ func scanIssue(row scanner) (*model.Issue, error) {
 	var iss model.Issue
 	var githubID sql.NullInt64
 	var labelsJSON string
+	var commentsJSON string
 	var createdAt, updatedAt string
 	var closedAt sql.NullString
 
 	err := row.Scan(&iss.ID, &iss.RepoID, &githubID, &iss.Title,
 		&iss.Status, &iss.Priority, &iss.IssueType,
 		&iss.Description, &iss.Owner, &labelsJSON,
-		&createdAt, &updatedAt, &closedAt)
+		&createdAt, &updatedAt, &closedAt, &commentsJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -438,6 +454,9 @@ func scanIssue(row scanner) (*model.Issue, error) {
 	}
 	if err := json.Unmarshal([]byte(labelsJSON), &iss.Labels); err != nil {
 		iss.Labels = []string{}
+	}
+	if err := json.Unmarshal([]byte(commentsJSON), &iss.Comments); err != nil {
+		iss.Comments = []model.Comment{}
 	}
 	iss.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	iss.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)

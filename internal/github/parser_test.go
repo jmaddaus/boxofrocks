@@ -191,10 +191,14 @@ func TestFormatEventComment_And_ParseEventComment_RoundTrip(t *testing.T) {
 
 	formatted := FormatEventComment(event)
 
-	// Verify versioned prefix.
-	prefix := "[boxofrocks:v1] "
-	if len(formatted) < len(prefix) || formatted[:len(prefix)] != prefix {
-		t.Fatalf("expected [boxofrocks:v1] prefix, got %q", formatted)
+	// Verify v2 format: should contain HTML comment with boxofrocks tag.
+	if !strings.Contains(formatted, "<!-- [boxofrocks:v2]") {
+		t.Fatalf("expected v2 HTML comment tag, got %q", formatted)
+	}
+
+	// Verify human-readable portion is present.
+	if !strings.Contains(formatted, "**Status changed**") {
+		t.Errorf("expected human-readable status change text, got %q", formatted)
 	}
 
 	parsed, err := ParseEventComment(formatted)
@@ -277,6 +281,170 @@ func TestParseEventComment_InvalidJSON(t *testing.T) {
 		if err == nil {
 			t.Errorf("expected error for invalid JSON in %q", body)
 		}
+	}
+}
+
+func TestParseEventComment_V1StillParsed(t *testing.T) {
+	// Ensure old v1 format is still parsed correctly by the updated parser.
+	body := `[boxofrocks:v1] {"timestamp":"2024-01-15T10:30:00Z","action":"status_change","payload":"{\"status\":\"in_progress\"}","agent":"user1"}`
+
+	parsed, err := ParseEventComment(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed == nil {
+		t.Fatal("expected parsed event, got nil")
+	}
+	if parsed.Action != model.ActionStatusChange {
+		t.Errorf("expected action status_change, got %q", parsed.Action)
+	}
+	if parsed.Agent != "user1" {
+		t.Errorf("expected agent user1, got %q", parsed.Agent)
+	}
+}
+
+func TestFormatHumanText_AllActions(t *testing.T) {
+	ts := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		event    *model.Event
+		contains []string
+	}{
+		{
+			name: "create",
+			event: &model.Event{
+				Timestamp: ts, Action: model.ActionCreate,
+				Payload: `{"title":"New Issue","description":"test desc"}`, Agent: "alice",
+			},
+			contains: []string{"**Created**: New Issue", "test desc", "alice"},
+		},
+		{
+			name: "status_change",
+			event: &model.Event{
+				Timestamp: ts, Action: model.ActionStatusChange,
+				Payload: `{"status":"in_progress","from_status":"open"}`, Agent: "bob",
+			},
+			contains: []string{"**Status changed**: open", "in_progress", "bob"},
+		},
+		{
+			name: "close",
+			event: &model.Event{
+				Timestamp: ts, Action: model.ActionClose, Payload: `{}`, Agent: "charlie",
+			},
+			contains: []string{"**Closed**", "charlie"},
+		},
+		{
+			name: "reopen",
+			event: &model.Event{
+				Timestamp: ts, Action: model.ActionReopen, Payload: `{}`, Agent: "dave",
+			},
+			contains: []string{"**Reopened**", "dave"},
+		},
+		{
+			name: "assign",
+			event: &model.Event{
+				Timestamp: ts, Action: model.ActionAssign,
+				Payload: `{"owner":"eve"}`, Agent: "frank",
+			},
+			contains: []string{"**Assigned** to eve", "frank"},
+		},
+		{
+			name: "update",
+			event: &model.Event{
+				Timestamp: ts, Action: model.ActionUpdate,
+				Payload: `{"title":"Updated Title","priority":1}`, Agent: "grace",
+			},
+			contains: []string{"**Updated**: title, priority", "grace"},
+		},
+		{
+			name: "delete",
+			event: &model.Event{
+				Timestamp: ts, Action: model.ActionDelete, Payload: `{}`, Agent: "heidi",
+			},
+			contains: []string{"**Deleted**", "heidi"},
+		},
+		{
+			name: "comment",
+			event: &model.Event{
+				Timestamp: ts, Action: model.ActionComment,
+				Payload: `{"comment":"This is a note"}`, Agent: "ivan",
+			},
+			contains: []string{"**Comment**: This is a note", "ivan"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatHumanText(tt.event)
+			for _, want := range tt.contains {
+				if !strings.Contains(result, want) {
+					t.Errorf("expected result to contain %q, got:\n%s", want, result)
+				}
+			}
+		})
+	}
+}
+
+func TestFormatHumanText_UpdateWithComment(t *testing.T) {
+	ts := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	event := &model.Event{
+		Timestamp: ts, Action: model.ActionUpdate,
+		Payload: `{"title":"New Title","comment":"Changed it"}`, Agent: "alice",
+	}
+	result := FormatHumanText(event)
+	if !strings.Contains(result, "> Changed it") {
+		t.Errorf("expected quoted comment in human text, got:\n%s", result)
+	}
+}
+
+func TestV2FormatRoundTrip_AllActions(t *testing.T) {
+	ts := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	actions := []struct {
+		action  model.Action
+		payload string
+	}{
+		{model.ActionCreate, `{"title":"Test"}`},
+		{model.ActionStatusChange, `{"status":"in_progress","from_status":"open"}`},
+		{model.ActionClose, `{}`},
+		{model.ActionReopen, `{}`},
+		{model.ActionAssign, `{"owner":"alice"}`},
+		{model.ActionUpdate, `{"title":"Updated"}`},
+		{model.ActionDelete, `{}`},
+		{model.ActionComment, `{"comment":"Hello"}`},
+	}
+
+	for _, tt := range actions {
+		t.Run(string(tt.action), func(t *testing.T) {
+			event := &model.Event{
+				Timestamp: ts,
+				Action:    tt.action,
+				Payload:   tt.payload,
+				Agent:     "test-agent",
+			}
+
+			formatted := FormatEventComment(event)
+			parsed, err := ParseEventComment(formatted)
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			if parsed == nil {
+				t.Fatal("expected parsed event")
+			}
+			if parsed.Action != tt.action {
+				t.Errorf("action: got %q, want %q", parsed.Action, tt.action)
+			}
+			if parsed.Payload != tt.payload {
+				t.Errorf("payload: got %q, want %q", parsed.Payload, tt.payload)
+			}
+			if parsed.Agent != "test-agent" {
+				t.Errorf("agent: got %q, want %q", parsed.Agent, "test-agent")
+			}
+			if !parsed.Timestamp.Equal(ts) {
+				t.Errorf("timestamp: got %v, want %v", parsed.Timestamp, ts)
+			}
+		})
 	}
 }
 

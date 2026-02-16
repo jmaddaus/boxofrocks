@@ -23,6 +23,7 @@ func (d *Daemon) registerRoutes() *http.ServeMux {
 	mux.HandleFunc("PATCH /issues/{id}", d.updateIssue)
 	mux.HandleFunc("DELETE /issues/{id}", d.deleteIssue)
 	mux.HandleFunc("POST /issues/{id}/assign", d.assignIssue)
+	mux.HandleFunc("POST /issues/{id}/comment", d.commentIssue)
 
 	return mux
 }

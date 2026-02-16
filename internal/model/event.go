@@ -12,6 +12,7 @@ const (
 	ActionUpdate       Action = "update"
 	ActionDelete       Action = "delete"
 	ActionReopen       Action = "reopen"
+	ActionComment      Action = "comment"
 )
 
 type Event struct {
@@ -37,4 +38,5 @@ type EventPayload struct {
 	IssueType   string   `json:"issue_type,omitempty"`
 	Owner       string   `json:"owner,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
+	Comment     string   `json:"comment,omitempty"`
 }
