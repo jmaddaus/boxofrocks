@@ -1,7 +1,7 @@
 <!-- @format -->
 
 # Box of Rocks (`bor`)
-Inspired by having too many issues with async control, json and daemon-spawn running various agents in VMs/sandboxes and worktrees using beads.
+Inspired by having too many issues with async control, json sync and daemon-spawn running various agents in VMs/sandboxes and worktrees using beads.
 
 A single machine daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background. Daemon uses http to coordinate between any number of local agents/humans across multiple repos. Supports unix socket and file-based queue in repo to communicate with default docker sandbox images and other VMs. Launch simple web UI at localhost:8042.
 
@@ -24,13 +24,14 @@ scoop install bor
 
 ### In Repo Directory (also each worktree path being used)
 bor init (—json for full sandbox, —socket if you need it)
-* creates .github/workflows/arbiter.yml
+* registers repo for use on this machine by agent or human
+* creates .github/workflows/arbiter.yml (if missing)
 * starts daemon (if not running)
-* creates .boxofrocks/ if using socket or queue
-* creates .boxofrocks/bor_api.sh reference if using json method for agent reference.
-* updates .gitignore with .boxofrocks/
+* creates .boxofrocks/ (if using socket or queue)
+* creates .boxofrocks/bor_api.sh reference (if using json method for agent reference)
+* updates .gitignore with .boxofrocks/ (if missing)
 
-### On GitHub
+### (First Time for Repo Only) On GitHub
 * enable Issues if disabled
 * push arbiter and updated gitignore to your repo, pull into main
 		
