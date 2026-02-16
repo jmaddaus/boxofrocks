@@ -63,12 +63,12 @@ func runInit(args []string, gf globalFlags) error {
 		"owner": parts[0],
 		"name":  parts[1],
 	}
+	localPath, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+	repoBody["local_path"] = localPath
 	if *socketFlag {
-		localPath, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
-		repoBody["local_path"] = localPath
 		repoBody["socket"] = true
 	}
 
@@ -85,18 +85,18 @@ func runInit(args []string, gf globalFlags) error {
 		if gf.pretty {
 			fmt.Printf("Repository %s already registered.\n", repo)
 		}
-		// If --socket was requested on an already-registered repo, enable it via update.
+		// Always update local_path; enable socket if --socket was requested.
+		updateBody := map[string]interface{}{
+			"local_path": localPath,
+		}
 		if *socketFlag {
-			localPath, _ := os.Getwd()
-			if _, updateErr := client.UpdateRepo(repo, map[string]interface{}{
-				"local_path":     localPath,
-				"socket_enabled": true,
-			}); updateErr != nil {
-				return fmt.Errorf("enable socket on existing repo: %w", updateErr)
-			}
-			if gf.pretty {
-				fmt.Println("Unix socket enabled.")
-			}
+			updateBody["socket_enabled"] = true
+		}
+		if _, updateErr := client.UpdateRepo(repo, updateBody); updateErr != nil {
+			return fmt.Errorf("update repo: %w", updateErr)
+		}
+		if gf.pretty && *socketFlag {
+			fmt.Println("Unix socket enabled.")
 		}
 	} else {
 		if gf.pretty {

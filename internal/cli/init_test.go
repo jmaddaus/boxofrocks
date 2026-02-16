@@ -45,6 +45,10 @@ func TestRunInit_AlreadyRegistered(t *testing.T) {
 			// 409 Conflict — already registered.
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]string{"error": "already exists"})
+		case r.URL.Path == "/repos" && r.Method == "PATCH":
+			// UpdateRepo for local_path.
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"message": "updated"})
 		case r.URL.Path == "/sync" && r.Method == "POST":
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]string{"message": "synced"})
