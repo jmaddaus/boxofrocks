@@ -45,7 +45,17 @@ func main() {
 	client := github.NewClient(token)
 	ctx := context.Background()
 
-	newBody, replayed, err := reconcile(ctx, client, owner, repo, issueNum)
+	// Check repo visibility to determine trusted-author filtering.
+	filterUntrusted := false
+	ghRepo, err := client.GetRepo(ctx, owner, repo)
+	if err != nil {
+		log.Printf("warning: could not check repo visibility, skipping author filtering: %v", err)
+	} else if !ghRepo.Private {
+		filterUntrusted = true
+		log.Printf("public repo detected, filtering untrusted author comments")
+	}
+
+	newBody, replayed, err := reconcile(ctx, client, owner, repo, issueNum, filterUntrusted)
 	if err != nil {
 		log.Fatalf("reconcile: %v", err)
 	}
@@ -86,8 +96,9 @@ func syncIssueState(ctx context.Context, client github.Client, owner, repo strin
 
 // reconcile fetches comments for the given issue, replays boxofrocks events,
 // and returns the new body and replayed issue state. Returns ("", nil, nil)
-// if there are no events to reconcile.
-func reconcile(ctx context.Context, client github.Client, owner, repo string, issueNum int) (string, *model.Issue, error) {
+// if there are no events to reconcile. When filterUntrusted is true, comments
+// from authors without a trusted association are skipped.
+func reconcile(ctx context.Context, client github.Client, owner, repo string, issueNum int, filterUntrusted bool) (string, *model.Issue, error) {
 	// 1. Fetch all comments (paginated)
 	comments, _, err := client.ListComments(ctx, owner, repo, issueNum, github.ListOpts{PerPage: 100})
 	if err != nil {
@@ -97,6 +108,10 @@ func reconcile(ctx context.Context, client github.Client, owner, repo string, is
 	// 2. Parse boxofrocks events from comments
 	var events []*model.Event
 	for _, c := range comments {
+		// Filter untrusted authors on public repos.
+		if filterUntrusted && !github.IsTrustedAuthor(c.AuthorAssociation) {
+			continue
+		}
 		ev, err := github.ParseEventComment(c.Body)
 		if err != nil || ev == nil {
 			continue // Skip non-boxofrocks comments

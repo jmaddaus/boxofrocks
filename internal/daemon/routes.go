@@ -13,6 +13,7 @@ func (d *Daemon) registerRoutes() *http.ServeMux {
 	// Repos.
 	mux.HandleFunc("POST /repos", d.addRepo)
 	mux.HandleFunc("GET /repos", d.listRepos)
+	mux.HandleFunc("PATCH /repos", d.updateRepo)
 
 	// Issues: register /issues/next BEFORE /issues/{id} so the literal
 	// route matches first.

@@ -206,6 +206,19 @@ func (d *Daemon) addRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-detect repo visibility and enable trusted-author filtering for public repos.
+	if d.ghClient != nil {
+		ghRepo, err := d.ghClient.GetRepo(r.Context(), req.Owner, req.Name)
+		if err != nil {
+			slog.Warn("could not check repo visibility", "repo", repo.FullName(), "error", err)
+		} else if !ghRepo.Private {
+			repo.TrustedAuthorsOnly = true
+			if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
+				slog.Warn("could not save trusted_authors_only setting", "repo", repo.FullName(), "error", err)
+			}
+		}
+	}
+
 	if d.syncMgr != nil {
 		if err := d.syncMgr.AddRepo(repo); err != nil {
 			slog.Warn("failed to start syncer for new repo", "repo", repo.FullName(), "error", err)
@@ -782,4 +795,44 @@ func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, issue)
+}
+
+// ---------------------------------------------------------------------------
+// Repo config update
+// ---------------------------------------------------------------------------
+
+type updateRepoRequest struct {
+	TrustedAuthorsOnly *bool `json:"trusted_authors_only"`
+}
+
+func (d *Daemon) updateRepo(w http.ResponseWriter, r *http.Request) {
+	repo, err := d.resolveRepo(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var req updateRepoRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if req.TrustedAuthorsOnly != nil {
+		repo.TrustedAuthorsOnly = *req.TrustedAuthorsOnly
+	}
+
+	if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
+		writeError(w, http.StatusInternalServerError, "update repo: "+err.Error())
+		return
+	}
+
+	// Re-fetch to return canonical state.
+	repo, err = d.store.GetRepo(r.Context(), repo.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, repo)
 }

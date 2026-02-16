@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jmaddaus/boxofrocks/internal/config"
+	"github.com/jmaddaus/boxofrocks/internal/github"
 	"github.com/jmaddaus/boxofrocks/internal/store"
 	"github.com/jmaddaus/boxofrocks/internal/sync"
 )
@@ -24,6 +25,7 @@ import (
 type Daemon struct {
 	cfg       *config.Config
 	store     store.Store
+	ghClient  github.Client
 	syncMgr   *sync.SyncManager
 	server    *http.Server
 	startedAt time.Time
@@ -66,11 +68,14 @@ func NewWithStore(cfg *config.Config, s store.Store) *Daemon {
 
 // NewWithStoreAndSync creates a Daemon with an injected store and optional SyncManager.
 // This is used by the CLI daemon start command to pass in a fully-wired SyncManager.
-func NewWithStoreAndSync(cfg *config.Config, s store.Store, sm *sync.SyncManager) *Daemon {
+func NewWithStoreAndSync(cfg *config.Config, s store.Store, sm *sync.SyncManager, gh ...github.Client) *Daemon {
 	d := &Daemon{
 		cfg:     cfg,
 		store:   s,
 		syncMgr: sm,
+	}
+	if len(gh) > 0 {
+		d.ghClient = gh[0]
 	}
 
 	mux := d.registerRoutes()

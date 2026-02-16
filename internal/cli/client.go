@@ -273,6 +273,23 @@ func (c *Client) Health() (map[string]interface{}, error) {
 	return result, nil
 }
 
+// UpdateRepo updates repo settings (e.g., trusted_authors_only).
+func (c *Client) UpdateRepo(repo string, fields map[string]interface{}) (*model.RepoConfig, error) {
+	path := "/repos"
+	if repo != "" {
+		path += "?repo=" + repo
+	}
+	resp, err := c.Do("PATCH", path, fields)
+	if err != nil {
+		return nil, err
+	}
+	var rc model.RepoConfig
+	if err := decodeOrError(resp, &rc); err != nil {
+		return nil, err
+	}
+	return &rc, nil
+}
+
 // ForceSync triggers a sync for the given repo.
 func (c *Client) ForceSync(repo string) error {
 	path := "/sync"

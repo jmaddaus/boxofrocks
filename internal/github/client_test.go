@@ -473,3 +473,75 @@ func TestUpdateIssueState_Error(t *testing.T) {
 		t.Fatal("expected error for 404 response")
 	}
 }
+
+func TestGetRepo_Public(t *testing.T) {
+	ts, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(GitHubRepo{Private: false})
+	})
+	defer ts.Close()
+
+	repo, err := client.GetRepo(context.Background(), "owner", "repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.Private {
+		t.Error("expected public repo (Private=false)")
+	}
+}
+
+func TestGetRepo_Private(t *testing.T) {
+	ts, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(GitHubRepo{Private: true})
+	})
+	defer ts.Close()
+
+	repo, err := client.GetRepo(context.Background(), "owner", "repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !repo.Private {
+		t.Error("expected private repo (Private=true)")
+	}
+}
+
+func TestGetRepo_Error(t *testing.T) {
+	ts, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"Not Found"}`))
+	})
+	defer ts.Close()
+
+	_, err := client.GetRepo(context.Background(), "owner", "repo")
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+}
+
+func TestIsTrustedAuthor(t *testing.T) {
+	tests := []struct {
+		association string
+		want        bool
+	}{
+		{"OWNER", true},
+		{"MEMBER", true},
+		{"COLLABORATOR", true},
+		{"CONTRIBUTOR", true},
+		{"FIRST_TIMER", false},
+		{"FIRST_TIME_CONTRIBUTOR", false},
+		{"NONE", false},
+		{"", false},
+		{"owner", true},  // case-insensitive
+		{"member", true}, // case-insensitive
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.association, func(t *testing.T) {
+			got := IsTrustedAuthor(tt.association)
+			if got != tt.want {
+				t.Errorf("IsTrustedAuthor(%q) = %v, want %v", tt.association, got, tt.want)
+			}
+		})
+	}
+}

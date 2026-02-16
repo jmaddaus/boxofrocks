@@ -94,8 +94,8 @@ func runDaemonForeground(gf globalFlags) error {
 		defer syncMgr.Stop()
 	}
 
-	// 5. Create and run daemon (passing syncMgr for use in handlers).
-	d := daemon.NewWithStoreAndSync(cfg, st, syncMgr)
+	// 5. Create and run daemon (passing syncMgr and ghClient for use in handlers).
+	d := daemon.NewWithStoreAndSync(cfg, st, syncMgr, ghClient)
 	return d.Run(context.Background())
 }
 

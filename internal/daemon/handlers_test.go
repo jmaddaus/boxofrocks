@@ -627,6 +627,9 @@ func (noopGitHubClient) CreateLabel(ctx context.Context, owner, repo, name, colo
 func (noopGitHubClient) UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error {
 	return nil
 }
+func (noopGitHubClient) GetRepo(ctx context.Context, owner, repo string) (*github.GitHubRepo, error) {
+	return &github.GitHubRepo{Private: true}, nil
+}
 func (noopGitHubClient) GetRateLimit() github.RateLimit {
 	return github.RateLimit{Remaining: 5000, Reset: time.Now().Add(time.Hour)}
 }
@@ -893,5 +896,39 @@ func TestAddRepoWithoutSyncManager(t *testing.T) {
 	decodeJSON(t, rr, &repo)
 	if repo.Owner != "testorg" || repo.Name != "testrepo" {
 		t.Errorf("unexpected repo: %+v", repo)
+	}
+}
+
+func TestUpdateRepoTrustedAuthorsOnly(t *testing.T) {
+	d := testDaemon(t)
+
+	// Create a repo first.
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+
+	// Enable trusted_authors_only.
+	rr := doRequest(t, d, "PATCH", "/repos?repo=o/r", map[string]interface{}{
+		"trusted_authors_only": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update repo: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if !repo.TrustedAuthorsOnly {
+		t.Error("expected trusted_authors_only=true")
+	}
+
+	// Disable it.
+	rr = doRequest(t, d, "PATCH", "/repos?repo=o/r", map[string]interface{}{
+		"trusted_authors_only": false,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update repo: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	decodeJSON(t, rr, &repo)
+	if repo.TrustedAuthorsOnly {
+		t.Error("expected trusted_authors_only=false")
 	}
 }
