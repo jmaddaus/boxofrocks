@@ -39,9 +39,10 @@ Run 'bor <command> --help' for more information on a command.`
 
 // globalFlags holds flags that are available to all subcommands.
 type globalFlags struct {
-	host   string
-	repo   string
-	pretty bool
+	host    string
+	repo    string
+	pretty  bool
+	version string
 }
 
 // parseGlobalFlags extracts global flags from the front of the argument list
@@ -100,6 +101,7 @@ func newClient(gf globalFlags) *Client {
 // Run dispatches the CLI based on the provided arguments.
 func Run(args []string, version string) error {
 	gf, remaining := parseGlobalFlags(args)
+	gf.version = version
 
 	if len(remaining) == 0 {
 		fmt.Println(usage)
