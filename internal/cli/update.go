@@ -14,7 +14,7 @@ func runUpdate(args []string, gf globalFlags) error {
 	description := fs.String("description", "", "New description")
 	comment := fs.String("comment", "", "Add a comment")
 
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderArgs(args)); err != nil {
 		return err
 	}
 
