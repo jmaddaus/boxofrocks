@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -120,7 +122,20 @@ func runInit(args []string, gf globalFlags) error {
 		}
 	}
 
-	// Step 4: Trigger initial sync unless --offline.
+	// Step 4: Ensure .boxofrocks is in .gitignore when socket or queue is enabled.
+	if *socketFlag || *jsonFlag {
+		if err := ensureGitignore(localPath, ".boxofrocks"); err != nil {
+			if err != errGitignoreExists {
+				if gf.pretty {
+					fmt.Printf("Warning: could not update .gitignore: %v\n", err)
+				}
+			}
+		} else if gf.pretty {
+			fmt.Println("Added .boxofrocks to .gitignore.")
+		}
+	}
+
+	// Step 5: Trigger initial sync unless --offline.
 	if !*offline {
 		if err := client.ForceSync(repo); err != nil {
 			// Non-fatal: sync might not be available.
@@ -134,7 +149,7 @@ func runInit(args []string, gf globalFlags) error {
 		}
 	}
 
-	// Step 5: Print result.
+	// Step 6: Print result.
 	if gf.pretty {
 		fmt.Println()
 		fmt.Println("Ready! Run 'bor list' to see issues.")
@@ -151,3 +166,51 @@ func runInit(args []string, gf globalFlags) error {
 
 	return nil
 }
+
+// ensureGitignore adds entry to the .gitignore in dir if it's not already present.
+// Returns nil without printing if the entry already exists.
+func ensureGitignore(dir, entry string) error {
+	gitignorePath := filepath.Join(dir, ".gitignore")
+
+	// Check if the entry already exists.
+	if f, err := os.Open(gitignorePath); err == nil {
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			if strings.TrimSpace(scanner.Text()) == entry {
+				return errGitignoreExists
+			}
+		}
+	}
+
+	// Append the entry with a trailing newline.
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// If the file is non-empty and doesn't end with a newline, add one first.
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	prefix := ""
+	if info.Size() > 0 {
+		// Read the last byte to check for trailing newline.
+		buf := make([]byte, 1)
+		rf, _ := os.Open(gitignorePath)
+		rf.Seek(-1, 2)
+		rf.Read(buf)
+		rf.Close()
+		if buf[0] != '\n' {
+			prefix = "\n"
+		}
+	}
+
+	_, err = fmt.Fprintf(f, "%s%s\n", prefix, entry)
+	return err
+}
+
+// errGitignoreExists is a sentinel indicating the entry already exists.
+var errGitignoreExists = fmt.Errorf("already in .gitignore")
