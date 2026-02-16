@@ -191,8 +191,11 @@ type RepoSyncer struct {
 }
 
 func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr *SyncManager, interval time.Duration) *RepoSyncer {
+	// Copy the repo config so the syncer owns its own copy and doesn't
+	// race with callers who hold the original pointer.
+	repoCopy := *repo
 	return &RepoSyncer{
-		repo:     repo,
+		repo:     &repoCopy,
 		store:    s,
 		ghClient: gh,
 		manager:  mgr,
@@ -201,8 +204,8 @@ func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr 
 		stopCh:   make(chan struct{}),
 		doneCh:   make(chan struct{}),
 		status: SyncStatus{
-			RepoName:   repo.FullName(),
-			LastSyncAt: repo.LastSyncAt,
+			RepoName:   repoCopy.FullName(),
+			LastSyncAt: repoCopy.LastSyncAt,
 		},
 	}
 }
