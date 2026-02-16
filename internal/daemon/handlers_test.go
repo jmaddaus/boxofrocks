@@ -1002,6 +1002,69 @@ func TestUpdateRepoSocketEnabled(t *testing.T) {
 	}
 }
 
+func TestAddRepoWithQueueField(t *testing.T) {
+	d := testDaemon(t)
+
+	rr := doRequest(t, d, "POST", "/repos", map[string]interface{}{
+		"owner":      "testorg",
+		"name":       "testrepo",
+		"local_path": "/tmp/testrepo",
+		"queue":      true,
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create repo: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if repo.LocalPath != "/tmp/testrepo" {
+		t.Errorf("expected local_path '/tmp/testrepo', got %q", repo.LocalPath)
+	}
+	if !repo.QueueEnabled {
+		t.Error("expected queue_enabled=true")
+	}
+	if repo.SocketEnabled {
+		t.Error("expected socket_enabled=false when only queue was requested")
+	}
+}
+
+func TestUpdateRepoQueueEnabled(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+
+	// Enable queue.
+	rr := doRequest(t, d, "PATCH", "/repos?repo=o/r", map[string]interface{}{
+		"local_path":    "/tmp/repo",
+		"queue_enabled": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update repo: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if !repo.QueueEnabled {
+		t.Error("expected queue_enabled=true")
+	}
+	if repo.LocalPath != "/tmp/repo" {
+		t.Errorf("expected local_path '/tmp/repo', got %q", repo.LocalPath)
+	}
+
+	// Disable queue.
+	rr = doRequest(t, d, "PATCH", "/repos?repo=o/r", map[string]interface{}{
+		"queue_enabled": false,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update repo: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	decodeJSON(t, rr, &repo)
+	if repo.QueueEnabled {
+		t.Error("expected queue_enabled=false")
+	}
+}
+
 func TestUpdateRepoTrustedAuthorsOnly(t *testing.T) {
 	d := testDaemon(t)
 
