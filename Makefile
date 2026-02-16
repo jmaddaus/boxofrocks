@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: build build-reconcile test vet fmt lint cross-compile checksums docker clean
+.PHONY: build build-reconcile test vet fmt lint cross-compile checksums docker release-dry-run clean
 
 build:
 	go build $(LDFLAGS) -o bin/bor ./cmd/bor
@@ -33,5 +33,8 @@ checksums:
 docker:
 	docker build -t boxofrocks:$(VERSION) .
 
+release-dry-run:
+	goreleaser release --snapshot --clean
+
 clean:
-	rm -rf bin/
+	rm -rf bin/ dist/

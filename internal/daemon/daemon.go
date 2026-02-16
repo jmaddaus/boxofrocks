@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	stdsync "sync"
@@ -37,6 +38,7 @@ type Daemon struct {
 	syncMgr   *sync.SyncManager
 	server    *http.Server
 	startedAt time.Time
+	version   string
 
 	socketMu    stdsync.Mutex
 	socketLns   map[string]net.Listener // sockPath → listener
@@ -90,10 +92,16 @@ func NewWithStore(cfg *config.Config, s store.Store) *Daemon {
 // NewWithStoreAndSync creates a Daemon with an injected store and optional SyncManager.
 // This is used by the CLI daemon start command to pass in a fully-wired SyncManager.
 func NewWithStoreAndSync(cfg *config.Config, s store.Store, sm *sync.SyncManager, gh ...github.Client) *Daemon {
+	return NewWithStoreAndSyncVersion(cfg, s, sm, "", gh...)
+}
+
+// NewWithStoreAndSyncVersion creates a Daemon with an injected store, optional SyncManager, and version string.
+func NewWithStoreAndSyncVersion(cfg *config.Config, s store.Store, sm *sync.SyncManager, version string, gh ...github.Client) *Daemon {
 	d := &Daemon{
 		cfg:         cfg,
 		store:       s,
 		syncMgr:     sm,
+		version:     version,
 		socketLns:   make(map[string]net.Listener),
 		socketRepos: make(map[string]int),
 		queueStops:  make(map[string]chan struct{}),
@@ -266,6 +274,79 @@ func (d *Daemon) startRepoSockets() {
 	}
 }
 
+// arbiterVersionRe matches the @vN or @main tag in a workflow uses: line.
+var arbiterVersionRe = regexp.MustCompile(`jmaddaus/boxofrocks/arbiter@(v\d+|main)`)
+
+// daemonMajorVersionTag extracts the major version tag from the daemon's version string.
+func daemonMajorVersionTag(version string) string {
+	v := strings.TrimPrefix(version, "v")
+	if v == "" || v == "dev" {
+		return ""
+	}
+	parts := strings.SplitN(v, ".", 2)
+	return "v" + parts[0]
+}
+
+// checkArbiterVersions warns if any repo's arbiter workflow is missing or has a version mismatch.
+func (d *Daemon) checkArbiterVersions() {
+	daemonTag := daemonMajorVersionTag(d.version)
+	if daemonTag == "" {
+		return // dev build, skip check
+	}
+
+	repos, err := d.store.ListRepos(context.Background())
+	if err != nil {
+		slog.Warn("could not list repos for arbiter check", "error", err)
+		return
+	}
+
+	for _, repo := range repos {
+		if repo.LocalPath == "" {
+			continue
+		}
+
+		// Look for arbiter.yml first, then reconcile.yml.
+		arbiterPath := filepath.Join(repo.LocalPath, ".github", "workflows", "arbiter.yml")
+		reconcilePath := filepath.Join(repo.LocalPath, ".github", "workflows", "reconcile.yml")
+
+		workflowPath := ""
+		if _, err := os.Stat(arbiterPath); err == nil {
+			workflowPath = arbiterPath
+		} else if _, err := os.Stat(reconcilePath); err == nil {
+			workflowPath = reconcilePath
+		}
+
+		if workflowPath == "" {
+			slog.Warn("arbiter workflow not found",
+				"repo", repo.FullName(),
+				"path", arbiterPath,
+				"hint", "run 'bor init' to create")
+			continue
+		}
+
+		data, err := os.ReadFile(workflowPath)
+		if err != nil {
+			continue
+		}
+		m := arbiterVersionRe.FindSubmatch(data)
+		if m == nil {
+			continue
+		}
+		workflowTag := string(m[1])
+		if workflowTag != daemonTag {
+			hint := "run 'bor init --update-arbiter' to update"
+			if workflowTag > daemonTag {
+				hint = "workflow is newer than this daemon"
+			}
+			slog.Warn("arbiter version mismatch",
+				"repo", repo.FullName(),
+				"workflow", workflowTag,
+				"daemon", daemonTag,
+				"hint", hint)
+		}
+	}
+}
+
 // Run starts the HTTP server and blocks until a SIGINT or SIGTERM is received
 // or the provided context is cancelled. It uses split Listen/Serve so the PID
 // file is written only after successful port bind.
@@ -296,6 +377,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start file-based queues for sandbox agent communication.
 	d.startFileQueues()
 	defer d.cleanupFileQueues()
+
+	// Check arbiter workflow versions (advisory only).
+	d.checkArbiterVersions()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

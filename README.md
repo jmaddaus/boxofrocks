@@ -27,13 +27,36 @@ bor list --all
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install jmaddaus/tap/bor
+```
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add bor https://github.com/jmaddaus/scoop-bucket
+scoop install bor
+```
+
+### Shell script (macOS/Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jmaddaus/boxofrocks/main/install.sh | sh
+```
+
+Set `BOR_INSTALL_DIR` to change the install location (default `/usr/local/bin`).
+
+### Go install
+
 Requires Go 1.22+.
 
 ```bash
 go install github.com/jmaddaus/boxofrocks/cmd/bor@latest
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/jmaddaus/boxofrocks.git
