@@ -10,17 +10,12 @@ runs:
     - name: Download reconcile binary
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
       run: |
         REF="${GITHUB_ACTION_REF:-latest}"
-        if [[ "$REF" == v* ]]; then
-          BASE_URL="https://github.com/jmaddaus/boxofrocks/releases/download/${REF}"
-        else
-          BASE_URL="https://github.com/jmaddaus/boxofrocks/releases/latest/download"
-        fi
-        AUTH_HEADER="Authorization: token ${GITHUB_TOKEN}"
-        curl --fail -sL -H "$AUTH_HEADER" "$BASE_URL/reconcile-linux-amd64" -o /tmp/reconcile-linux-amd64
-        curl --fail -sL -H "$AUTH_HEADER" "$BASE_URL/checksums.txt" -o /tmp/checksums.txt
+        gh release download "$REF" --repo "$GH_REPO" --pattern "reconcile-linux-amd64" --dir /tmp
+        gh release download "$REF" --repo "$GH_REPO" --pattern "checksums.txt" --dir /tmp
         cd /tmp && grep reconcile-linux-amd64 checksums.txt | sha256sum --check
         mv /tmp/reconcile-linux-amd64 /tmp/reconcile
         chmod +x /tmp/reconcile
