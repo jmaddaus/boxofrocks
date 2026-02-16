@@ -11,7 +11,7 @@ func runCreate(args []string, gf globalFlags) error {
 	issueType := fs.String("t", "task", "Issue type (task, bug, feature, epic)")
 	description := fs.String("d", "", "Description")
 
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderArgs(args)); err != nil {
 		return err
 	}
 
