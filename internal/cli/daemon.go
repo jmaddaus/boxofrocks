@@ -286,4 +286,3 @@ func readTailLines(path string, n int) (string, error) {
 	}
 	return string(out), nil
 }
-

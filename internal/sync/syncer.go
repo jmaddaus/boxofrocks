@@ -177,16 +177,16 @@ type syncRequest struct {
 
 // RepoSyncer runs a sync loop for a single repository.
 type RepoSyncer struct {
-	repo          *model.RepoConfig
-	store         store.Store
-	ghClient      github.Client
-	manager       *SyncManager // back-reference for rate limit
-	interval      time.Duration
-	forceCh       chan syncRequest
-	stopCh        chan struct{}
-	status        SyncStatus
-	mu            sync.RWMutex
-	labelEnsured  bool
+	repo         *model.RepoConfig
+	store        store.Store
+	ghClient     github.Client
+	manager      *SyncManager // back-reference for rate limit
+	interval     time.Duration
+	forceCh      chan syncRequest
+	stopCh       chan struct{}
+	status       SyncStatus
+	mu           sync.RWMutex
+	labelEnsured bool
 }
 
 func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr *SyncManager, interval time.Duration) *RepoSyncer {

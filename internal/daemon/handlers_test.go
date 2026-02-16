@@ -752,4 +752,3 @@ func TestAddRepoWithoutSyncManager(t *testing.T) {
 		t.Errorf("unexpected repo: %+v", repo)
 	}
 }
-
