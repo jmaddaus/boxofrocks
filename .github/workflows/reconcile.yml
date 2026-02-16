@@ -6,7 +6,7 @@
 
   jobs:
     reconcile:
-      if: contains(github.event.comment.body, '[boxofrocks]')
+      if: contains(github.event.comment.body, 'boxofrocks')
       runs-on: ubuntu-latest
       steps:
         - uses: jmaddaus/boxofrocks/arbiter@main
