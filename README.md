@@ -1,6 +1,6 @@
 # Box of Rocks (`bor`)
 
-A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background.  Daemon uses http to coordinate between any number of local agents/humans across multiple repos.  Supports unix socket in repo to communicate with default docker sandbox images and other VMs.  Launch simple web UI at localhost:8042.
+A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background.  Daemon uses http to coordinate between any number of local agents/humans across multiple repos.  Supports unix socket and file-based queue in repo to communicate with default docker sandbox images and other VMs.  Launch simple web UI at localhost:8042.
 
 ## Quick Start
 
@@ -9,7 +9,7 @@ A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: 
 go build -o bor ./cmd/bor
 
 # Initialize a repo (auto-starts daemon in background)
-bor init #--socket if you need unix socket for sandbox comms
+bor init #--socket if you need unix socket / file queue for sandbox comms
 
 # Create and manage issues
 bor create "Fix login bug" -p 1 -t bug -d "Users can't log in with SSO"
@@ -122,7 +122,7 @@ Remove the stored GitHub token.
 
 #### `bor init [--repo owner/name] [--socket] [--offline]`
 
-Initialize a repository. Auto-starts the daemon if not running, checks auth, registers the repo, and triggers initial sync. Use `--socket` to enable a Unix domain socket at `.boxofrocks/bor.sock` for sandbox agent access. Use `--offline` to skip sync.
+Initialize a repository. Auto-starts the daemon if not running, checks auth, registers the repo, and triggers initial sync. Use `--socket` to enable a Unix domain socket at `.boxofrocks/bor.sock` and a file-based queue at `.boxofrocks/queue/` for sandbox agent access. Use `--offline` to skip sync.
 
 #### `bor create "title" [-p priority] [-t type] [-d description]`
 
@@ -178,19 +178,26 @@ bor -r owner/repo2 list    # explicit override
 
 ## Docker / Sandbox Usage
 
-When the agent runs inside a container or sandbox, the daemon on the host is not reachable at `localhost`. Two options:
+When the agent runs inside a container or sandbox, the daemon on the host is not reachable at `localhost`. Three options:
 
-**Unix socket (recommended):** Initialize with `--socket` and agents use `curl` over the mounted socket — no network access or binary installation required:
+**File queue (recommended for Docker Desktop):** Initialize with `--socket` and agents use a shell function that writes JSON request files to `.boxofrocks/queue/`. Works across the macOS/Windows Docker Desktop VM boundary where Unix sockets cannot:
 
 ```bash
 # On host:
 bor init --socket
 
-# In sandbox (repo directory is mounted):
+# In sandbox — use the bor_api shell function from the agent templates:
+bor_api GET /issues/next
+bor_api POST /issues/1/assign '{"owner":"claude"}'
+```
+
+**Unix socket:** Also enabled by `--socket`. Agents use `curl` over the mounted socket — works on Linux hosts where sockets cross the container boundary:
+
+```bash
 curl -s --unix-socket .boxofrocks/bor.sock http://l/issues/next
 ```
 
-See [docs/agent-instructions/](docs/agent-instructions/) for drop-in templates.
+See [docs/agent-instructions/](docs/agent-instructions/) for drop-in templates with three variants: `-native` (bor CLI), `-socket` (curl), and `-json` (file queue).
 
 **TCP via TRACKER_HOST (legacy):** Set the `TRACKER_HOST` environment variable:
 
