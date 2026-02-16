@@ -148,6 +148,16 @@ Close an issue (shorthand for `bor update <id> --status closed`).
 
 Assign an issue to an owner.
 
+#### `bor comment <id> "text"`
+
+Add a comment to an issue.
+
+#### `bor config trusted-authors-only <true|false>`
+
+Toggle trusted author filtering for a repo. When enabled, inbound sync only applies GitHub comments from trusted authors (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR). Comments from untrusted users (NONE, FIRST_TIMER, FIRST_TIME_CONTRIBUTOR) are silently skipped.
+
+This is auto-enabled for public repos during `bor init`. Use `--repo` to target a specific repo.
+
 ## Multi-Repo Support
 
 The daemon manages multiple repositories on one machine. When multiple repos are registered, specify which repo to target:
@@ -181,6 +191,18 @@ For first-time setup without connectivity:
 ```bash
 bor init --repo owner/name --offline
 ```
+
+## Trusted Author Filtering
+
+On public repositories, anyone can comment on issues. Since bor parses `[boxofrocks]`-formatted comments as events, this could allow untrusted users to inject status changes. To prevent this, bor filters inbound comments by GitHub's `author_association` field.
+
+- **Auto-enabled** for public repos during `bor init`
+- **Off by default** for private repos
+- **Toggle per repo:** `bor config trusted-authors-only true/false`
+- **Trusted associations:** OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR
+- **Untrusted (filtered):** FIRST_TIMER, FIRST_TIME_CONTRIBUTOR, NONE
+
+Both the daemon sync layer and the arbiter GitHub Action apply this filter.
 
 ## Event Model
 

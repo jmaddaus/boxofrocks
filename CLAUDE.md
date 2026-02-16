@@ -45,9 +45,9 @@ model ← (used by all packages)
 | `internal/model` | Data types: Issue, Event, RepoConfig, constants | No |
 | `internal/store` | `Store` interface + SQLite implementation | Yes (33) |
 | `internal/engine` | Pure-logic event replay (`Replay`, `Apply`) | Yes (21) |
-| `internal/github` | GitHub REST API client, auth, body/comment parser | Yes (30) |
-| `internal/sync` | `SyncManager` + per-repo `RepoSyncer` goroutines | Yes (14) |
-| `internal/daemon` | HTTP server, routes, handlers, middleware | Yes (22) |
+| `internal/github` | GitHub REST API client, auth, body/comment parser, `IsTrustedAuthor` | Yes (37) |
+| `internal/sync` | `SyncManager` + per-repo `RepoSyncer` goroutines, trusted-author filtering | Yes (17) |
+| `internal/daemon` | HTTP server, routes, handlers, middleware | Yes (23) |
 | `internal/cli` | CLI commands, HTTP client to daemon, output formatting | No |
 | `internal/config` | `~/.boxofrocks/config.json` management | No |
 | `arbiter/cmd/reconcile` | Standalone binary for GitHub Action | No |
@@ -83,8 +83,10 @@ Stale/skipped events are silently ignored during replay (not errors). This is in
 
 Each `RepoSyncer` poll cycle:
 1. **Push outbound:** query `PendingEvents(synced=0)`, post as GitHub comments, mark synced
-2. **Pull inbound:** list GitHub issues with `boxofrocks` label, fetch new comments since `last_comment_id`, apply incrementally
+2. **Pull inbound:** list GitHub issues with `boxofrocks` label, fetch new comments since `last_comment_id`, filter by `author_association` if `TrustedAuthorsOnly` is enabled, apply incrementally
 3. **Web-created issues:** GitHub issues with `boxofrocks` label but no local match get a synthetic `create` event
+
+**Trusted author filtering:** When `RepoConfig.TrustedAuthorsOnly` is true, inbound comments are filtered by `github.IsTrustedAuthor(c.AuthorAssociation)` before processing (both incremental and full replay paths). Trusted associations: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR. Auto-enabled for public repos during `bor init`. The arbiter applies the same filter by checking repo visibility via `GetRepo`.
 
 **Adaptive polling:** Each syncer tracks a `lastActivityAt` timestamp. If a cycle pushes outbound events or receives inbound changes, `lastActivityAt` is reset. Polling uses two tiers:
 - **Fast** (5s base, scaled by repo count): used when `lastActivityAt` is within 2 minutes
@@ -116,6 +118,7 @@ Force sync always resets to fast tier. The `SyncStatus.Idle` field reports wheth
 - **Event comments use `[boxofrocks]` prefix.** Parser expects this exact prefix. Human comments without it are ignored.
 - **Metadata blocks use HTML comments.** `<!-- boxofrocks {"status":"open",...} -->` in issue bodies. Parser preserves surrounding human text.
 - **Rate limiting is shared.** `SyncManager` holds shared rate limit state across all repos. Individual `RepoSyncer` goroutines check via `manager.checkRateLimit()`.
+- **Trusted author filtering is silent.** When `TrustedAuthorsOnly=true`, comments from untrusted authors are skipped without error. The same `IsTrustedAuthor()` function is used in both the sync layer and the arbiter. The arbiter checks repo visibility via `GetRepo` since it has no local DB.
 
 ## Adding a New Event Action
 

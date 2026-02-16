@@ -85,6 +85,8 @@ bor next                  # Get the next issue to work on
 bor update 42 --status in_progress
 bor assign 42 --owner @me
 bor close 42
+bor config trusted-authors-only true   # Enable trusted author filtering
+bor config trusted-authors-only false  # Disable trusted author filtering
 ```
 
 Use `--pretty` for human-readable output, or pipe JSON (default) to `jq`.
@@ -117,3 +119,5 @@ go fmt ./...
 **"port :8042 already in use"** — Another daemon instance is running. Use `bor daemon stop` first, or check with `bor daemon status`.
 
 **Sync not working** — Check `bor daemon logs` for errors. Verify auth with `bor login --status`.
+
+**Comments from external contributors not syncing** — If `trusted-authors-only` is enabled (auto-enabled for public repos), comments from users who are not OWNER, MEMBER, COLLABORATOR, or CONTRIBUTOR are filtered. Disable with `bor config trusted-authors-only false`.

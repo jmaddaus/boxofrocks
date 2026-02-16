@@ -4,13 +4,19 @@ The arbiter is a GitHub Action that reconciles event-sourced state on GitHub Iss
 
 ## How It Works
 
-1. Fetches all comments on the specified GitHub issue
-2. Filters comments to those prefixed with `[boxofrocks]`
-3. Parses each matching comment into a structured event
-4. Replays all events through the state engine to derive current issue state
-5. Updates the issue body with the reconciled metadata (status, priority, owner, labels, issue type)
+1. Checks repo visibility via the GitHub API
+2. Fetches all comments on the specified GitHub issue
+3. On public repos, filters out comments from untrusted authors (FIRST_TIMER, FIRST_TIME_CONTRIBUTOR, NONE)
+4. Filters remaining comments to those prefixed with `[boxofrocks]`
+5. Parses each matching comment into a structured event
+6. Replays all events through the state engine to derive current issue state
+7. Updates the issue body with the reconciled metadata (status, priority, owner, labels, issue type)
 
 Human-written text in the issue body is preserved; only the hidden metadata comment block is updated.
+
+### Trusted Author Filtering
+
+On public repositories, the arbiter automatically filters comments by `author_association` to prevent untrusted users from injecting events. Only comments from OWNER, MEMBER, COLLABORATOR, or CONTRIBUTOR are processed. On private repos, all comments are processed since access is already restricted.
 
 ## Installation
 
