@@ -9,6 +9,8 @@ runs:
   steps:
     - name: Download reconcile binary
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         REF="${GITHUB_ACTION_REF:-latest}"
         if [[ "$REF" == v* ]]; then
@@ -16,8 +18,9 @@ runs:
         else
           BASE_URL="https://github.com/jmaddaus/boxofrocks/releases/latest/download"
         fi
-        curl --fail -sL "$BASE_URL/reconcile-linux-amd64" -o /tmp/reconcile-linux-amd64
-        curl --fail -sL "$BASE_URL/checksums.txt" -o /tmp/checksums.txt
+        AUTH_HEADER="Authorization: token ${GITHUB_TOKEN}"
+        curl --fail -sL -H "$AUTH_HEADER" "$BASE_URL/reconcile-linux-amd64" -o /tmp/reconcile-linux-amd64
+        curl --fail -sL -H "$AUTH_HEADER" "$BASE_URL/checksums.txt" -o /tmp/checksums.txt
         cd /tmp && grep reconcile-linux-amd64 checksums.txt | sha256sum --check
         mv /tmp/reconcile-linux-amd64 /tmp/reconcile
         chmod +x /tmp/reconcile
