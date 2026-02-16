@@ -13,7 +13,7 @@ Box of Rocks is a daemon + CLI issue tracker backed by GitHub Issues, written in
 
 ```bash
 go build ./...          # Build everything
-go test ./...           # Run all tests (~120 tests across 5 packages)
+go test ./...           # Run all tests (~130 tests across 5 packages)
 go vet ./...            # Static analysis
 go fmt ./...            # Format code
 go test -run TestName ./internal/store/  # Run a specific test in a specific package
@@ -42,12 +42,12 @@ model ← (used by all packages)
 
 | Package | Role | Has tests |
 |---------|------|-----------|
-| `internal/model` | Data types: Issue, Event, RepoConfig, constants | No |
-| `internal/store` | `Store` interface + SQLite implementation | Yes (33) |
+| `internal/model` | Data types: Issue, Event, RepoConfig, LocalPathConfig, constants | No |
+| `internal/store` | `Store` interface + SQLite implementation | Yes (39) |
 | `internal/engine` | Pure-logic event replay (`Replay`, `Apply`) | Yes (21) |
 | `internal/github` | GitHub REST API client, auth, body/comment parser, `IsTrustedAuthor` | Yes (37) |
 | `internal/sync` | `SyncManager` + per-repo `RepoSyncer` goroutines, trusted-author filtering | Yes (17) |
-| `internal/daemon` | HTTP server, routes, handlers, middleware, Unix socket lifecycle | Yes (25) |
+| `internal/daemon` | HTTP server, routes, handlers, middleware, Unix socket lifecycle | Yes (29) |
 | `internal/cli` | CLI commands, HTTP client to daemon, output formatting | No |
 | `internal/config` | `~/.boxofrocks/config.json` management | No |
 | `arbiter/cmd/reconcile` | Standalone binary for GitHub Action | No |
@@ -119,6 +119,7 @@ Force sync always resets to fast tier. The `SyncStatus.Idle` field reports wheth
 - **Metadata blocks use HTML comments.** `<!-- boxofrocks {"status":"open",...} -->` in issue bodies. Parser preserves surrounding human text.
 - **Rate limiting is shared.** `SyncManager` holds shared rate limit state across all repos. Individual `RepoSyncer` goroutines check via `manager.checkRateLimit()`.
 - **Trusted author filtering is silent.** When `TrustedAuthorsOnly=true`, comments from untrusted authors are skipped without error. The same `IsTrustedAuthor()` function is used in both the sync layer and the arbiter. The arbiter checks repo visibility via `GetRepo` since it has no local DB.
+- **`RepoConfig.LocalPath` is a backfilled legacy field.** Authoritative data is in `repo.LocalPaths` (from `repo_local_paths` table). The top-level `LocalPath`/`SocketEnabled`/`QueueEnabled` are populated from the first entry by `loadLocalPaths()`. Old `repos` table columns are dormant.
 
 ## Adding a New Event Action
 
@@ -156,21 +157,24 @@ Default config at `~/.boxofrocks/config.json`:
 
 `TRACKER_HOST` env var overrides the daemon URL (default `http://127.0.0.1:8042`). Used for Docker containers pointing at `host.docker.internal`.
 
-### Unix Domain Sockets
+### Unix Domain Sockets & Worktrees
 
-`bor init --socket` stores the repo's local path and enables a Unix domain socket at `.boxofrocks/bor.sock`. This allows sandbox agents to communicate with the daemon via `curl --unix-socket` without network access or binary installation.
+`bor init --socket` registers the working directory as a local path for the repo and enables a Unix domain socket at `.boxofrocks/bor.sock`. Each repo supports multiple local paths (e.g., git worktrees), each with independent socket and file queue. Re-running `bor init` from a different worktree adds a path rather than overwriting.
 
 **Repo resolution chain** (`resolveRepo` in `daemon/handlers.go`):
 1. `?repo=` query param
 2. `X-Repo` header
 3. Socket association — `ConnContext` injects repo ID for Unix socket connections
-4. `X-Working-Dir` header — CLI sends cwd automatically, daemon matches against `RepoConfig.LocalPath` (longest prefix)
+4. `X-Working-Dir` header — matches against all `repo.LocalPaths` (longest prefix)
 5. Single-repo implicit fallback
 
+**Local path management** (`POST /repos/paths`, `DELETE /repos/paths`):
+- Paths stored in `repo_local_paths` table (schema v5), globally unique per directory
+- Upserts on conflict — safe to call repeatedly from the same directory
+
 **Socket lifecycle** (in `daemon/daemon.go`):
-- `CreateSocketForRepo()` — creates `.boxofrocks/` dir, removes stale socket, listens, spawns `server.Serve(ln)` goroutine
-- `startRepoSockets()` — called in `Run()` after PID file, iterates repos with `SocketEnabled=true`
-- `cleanupSockets()` — removes socket files on shutdown
+- `createSocketAtPath(repoID, sockPath)` — creates dir, removes stale socket, listens, serves
+- `startRepoSockets()` — on startup, iterates all `repo.LocalPaths` with `SocketEnabled=true`
 - `socketRepos map[string]int` — maps socket path to repo ID for `ConnContext` lookup
 
 ## Auth Chain
