@@ -106,6 +106,7 @@ func (d *Daemon) startFileQueueAtPath(repoID int, queueDir string) error {
 	}
 
 	cleanStaleQueueFiles(queueDir)
+	writeBorAPIScript(queueDir)
 
 	stop := make(chan struct{})
 	d.queueStops[queueDir] = stop
@@ -278,6 +279,56 @@ func (d *Daemon) writeQueueResponse(reqPath string, status int, body interface{}
 
 	// Remove the request file.
 	os.Remove(reqPath)
+}
+
+// ---------------------------------------------------------------------------
+// Helper script
+// ---------------------------------------------------------------------------
+
+const borAPIScript = `#!/usr/bin/env bash
+# bor_api — file-based queue client for boxofrocks
+# Usage: bor_api METHOD /path [json_body]
+
+BOR_QUEUE="${BOR_QUEUE:-.boxofrocks/queue}"
+
+bor_api() {
+  local method="$1" path="$2" body="${3:-null}"
+  local id
+  id="$(date +%s%N)$$"
+  local req="$BOR_QUEUE/${id}.req"
+  local resp="$BOR_QUEUE/${id}.resp"
+
+  mkdir -p "$BOR_QUEUE"
+
+  printf '{"method":"%s","path":"%s","body":%s}\n' \
+    "$method" "$path" "$body" > "${req}.tmp"
+  mv "${req}.tmp" "$req"
+
+  local i=0
+  while [ ! -f "$resp" ] && [ $i -lt 300 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+
+  if [ -f "$resp" ]; then
+    cat "$resp"
+    rm -f "$req" "$resp"
+  else
+    echo '{"error":"timeout waiting for daemon response"}'
+    rm -f "$req"
+    return 1
+  fi
+}
+`
+
+// writeBorAPIScript writes .boxofrocks/bor_api.sh next to the queue directory.
+// Overwrites on every start so the script stays current with the daemon version.
+func writeBorAPIScript(queueDir string) {
+	boxDir := filepath.Dir(queueDir) // .boxofrocks/queue → .boxofrocks
+	scriptPath := filepath.Join(boxDir, "bor_api.sh")
+	if err := os.WriteFile(scriptPath, []byte(borAPIScript), 0755); err != nil {
+		slog.Warn("could not write bor_api.sh", "path", scriptPath, "error", err)
+	}
 }
 
 // ---------------------------------------------------------------------------

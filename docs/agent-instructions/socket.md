@@ -1,4 +1,4 @@
-# Task Management
+# Task Management (bor)
 
 This project uses `bor` for issue tracking via a Unix socket.
 

@@ -1,4 +1,4 @@
-## Task Management (bor)
+# Task Management (bor)
 
 This project uses `bor` for issue tracking. The daemon must be running (`bor daemon start`).
 
