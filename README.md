@@ -1,6 +1,6 @@
 # Box of Rocks (`bor`)
 
-A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background.
+A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background.  Daemon uses http to coordinate between any number of local agents/humans across multiple repos.  Supports unix socket in repo to communicate with default docker sandbox images and other VMs.  Launch simple web UI at localhost:8042.
 
 ## Quick Start
 
@@ -9,7 +9,7 @@ A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: 
 go build -o bor ./cmd/bor
 
 # Initialize a repo (auto-starts daemon in background)
-bor init --socket
+bor init #--socket if you need unix socket for sandbox comms
 
 # Create and manage issues
 bor create "Fix login bug" -p 1 -t bug -d "Users can't log in with SSO"
