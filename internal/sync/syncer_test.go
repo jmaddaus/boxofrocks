@@ -326,8 +326,12 @@ func TestPushOutbound_CommentPosted(t *testing.T) {
 	// Run push.
 	sm := NewSyncManager(s, gh)
 	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
-	if err := rs.pushOutbound(ctx); err != nil {
+	pushed, err := rs.pushOutbound(ctx)
+	if err != nil {
 		t.Fatalf("pushOutbound: %v", err)
+	}
+	if !pushed {
+		t.Fatal("expected pushOutbound to report activity")
 	}
 
 	// Verify comment was posted.
@@ -396,8 +400,12 @@ func TestPushOutbound_CreateIssue(t *testing.T) {
 	// Run push.
 	sm := NewSyncManager(s, gh)
 	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
-	if err := rs.pushOutbound(ctx); err != nil {
+	pushed, err := rs.pushOutbound(ctx)
+	if err != nil {
 		t.Fatalf("pushOutbound: %v", err)
+	}
+	if !pushed {
+		t.Fatal("expected pushOutbound to report activity")
 	}
 
 	// Verify GitHub issue was created.
@@ -494,8 +502,12 @@ func TestPullInbound_NewComments(t *testing.T) {
 	// Run pull.
 	sm := NewSyncManager(s, gh)
 	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
-	if err := rs.pullInbound(ctx); err != nil {
+	pulled, err := rs.pullInbound(ctx)
+	if err != nil {
 		t.Fatalf("pullInbound: %v", err)
+	}
+	if !pulled {
+		t.Fatal("expected pullInbound to report activity")
 	}
 
 	// Verify the local issue was updated.
@@ -536,7 +548,7 @@ func TestPullInbound_WebCreatedIssue(t *testing.T) {
 	// Run pull.
 	sm := NewSyncManager(s, gh)
 	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
-	if err := rs.pullInbound(ctx); err != nil {
+	if _, err := rs.pullInbound(ctx); err != nil {
 		t.Fatalf("pullInbound: %v", err)
 	}
 
@@ -639,7 +651,7 @@ func TestPullInbound_Incremental(t *testing.T) {
 	// Run pull.
 	sm := NewSyncManager(s, gh)
 	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
-	if err := rs.pullInbound(ctx); err != nil {
+	if _, err := rs.pullInbound(ctx); err != nil {
 		t.Fatalf("pullInbound: %v", err)
 	}
 
@@ -980,7 +992,7 @@ func TestPullInbound_UsesSince(t *testing.T) {
 		t.Errorf("expected initial IssuesSince, got %q", rs.repo.IssuesSince)
 	}
 
-	if err := rs.pullInbound(ctx); err != nil {
+	if _, err := rs.pullInbound(ctx); err != nil {
 		t.Fatalf("pullInbound: %v", err)
 	}
 
@@ -1018,7 +1030,7 @@ func TestPullInbound_SinceNotUsedForFullSync(t *testing.T) {
 	sm := NewSyncManager(s, gh)
 	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
 
-	if err := rs.pullInboundFull(ctx); err != nil {
+	if _, err := rs.pullInboundFull(ctx); err != nil {
 		t.Fatalf("pullInboundFull: %v", err)
 	}
 
@@ -1088,5 +1100,109 @@ func TestCycleCreatesLabelOnlyOnce(t *testing.T) {
 
 	if calls != 1 {
 		t.Fatalf("expected CreateLabel called exactly once across 3 cycles, got %d", calls)
+	}
+}
+
+func TestRepoSyncer_CurrentInterval(t *testing.T) {
+	s, gh, repo := setupTest(t)
+
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+
+	// Freshly created syncer should use fast interval.
+	if got := rs.currentInterval(); got != 5*time.Second {
+		t.Errorf("expected fast interval (5s), got %v", got)
+	}
+
+	// Simulate being idle: set lastActivityAt to well past the threshold.
+	rs.mu.Lock()
+	rs.lastActivityAt = time.Now().Add(-(idleThreshold + time.Minute))
+	rs.mu.Unlock()
+
+	if got := rs.currentInterval(); got != slowInterval {
+		t.Errorf("expected slow interval (%v), got %v", slowInterval, got)
+	}
+
+	// setLastActivity should bring it back to fast.
+	rs.setLastActivity()
+
+	if got := rs.currentInterval(); got != 5*time.Second {
+		t.Errorf("expected fast interval after setLastActivity, got %v", got)
+	}
+}
+
+func TestRepoSyncer_ActivityResetOnPush(t *testing.T) {
+	s, gh, repo := setupTest(t)
+	ctx := context.Background()
+
+	// Create a local issue with a GitHub ID already set.
+	ghID := 42
+	issue := &model.Issue{
+		RepoID:    repo.ID,
+		GitHubID:  &ghID,
+		Title:     "Activity Test",
+		Status:    model.StatusOpen,
+		IssueType: model.IssueTypeTask,
+		Labels:    []string{},
+	}
+	created, err := s.CreateIssue(ctx, issue)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	// Create a pending event.
+	ev := &model.Event{
+		RepoID:    repo.ID,
+		IssueID:   created.ID,
+		Timestamp: time.Now().UTC(),
+		Action:    model.ActionStatusChange,
+		Payload:   makeStatusChangePayload(model.StatusInProgress),
+		Agent:     "test",
+		Synced:    0,
+	}
+	if _, err := s.AppendEvent(ctx, ev); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+
+	// Force the syncer into idle mode.
+	rs.mu.Lock()
+	rs.lastActivityAt = time.Now().Add(-(idleThreshold + time.Minute))
+	rs.mu.Unlock()
+
+	if got := rs.currentInterval(); got != slowInterval {
+		t.Fatalf("expected slow interval before push, got %v", got)
+	}
+
+	// Run a cycle — it should push the pending event and reset activity.
+	rs.cycle(false)
+
+	if got := rs.currentInterval(); got != 5*time.Second {
+		t.Errorf("expected fast interval after cycle with push activity, got %v", got)
+	}
+}
+
+func TestRepoSyncer_IdleStatus(t *testing.T) {
+	s, gh, repo := setupTest(t)
+
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+
+	// Freshly created — should not be idle.
+	st := rs.getStatus()
+	if st.Idle {
+		t.Error("expected Idle=false for fresh syncer")
+	}
+
+	// Force into idle.
+	rs.mu.Lock()
+	rs.lastActivityAt = time.Now().Add(-(idleThreshold + time.Minute))
+	rs.mu.Unlock()
+
+	st = rs.getStatus()
+	if !st.Idle {
+		t.Error("expected Idle=true after exceeding idle threshold")
 	}
 }
