@@ -5,6 +5,7 @@
       types: [created]
 
   permissions:
+    contents: read
     issues: write
 
   jobs:
