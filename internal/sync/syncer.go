@@ -184,6 +184,7 @@ type RepoSyncer struct {
 	interval     time.Duration
 	forceCh      chan syncRequest
 	stopCh       chan struct{}
+	doneCh       chan struct{} // closed when run() exits
 	status       SyncStatus
 	mu           sync.RWMutex
 	labelEnsured bool
@@ -198,6 +199,7 @@ func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr 
 		interval: interval,
 		forceCh:  make(chan syncRequest, 1),
 		stopCh:   make(chan struct{}),
+		doneCh:   make(chan struct{}),
 		status: SyncStatus{
 			RepoName:   repo.FullName(),
 			LastSyncAt: repo.LastSyncAt,
@@ -206,6 +208,8 @@ func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr 
 }
 
 func (rs *RepoSyncer) run(startDelay time.Duration) {
+	defer close(rs.doneCh)
+
 	if startDelay > 0 {
 		select {
 		case <-time.After(startDelay):
@@ -232,6 +236,7 @@ func (rs *RepoSyncer) run(startDelay time.Duration) {
 	}
 }
 
+// stop signals the syncer goroutine to exit and waits for it to finish.
 func (rs *RepoSyncer) stop() {
 	select {
 	case <-rs.stopCh:
@@ -239,6 +244,7 @@ func (rs *RepoSyncer) stop() {
 	default:
 		close(rs.stopCh)
 	}
+	<-rs.doneCh
 }
 
 func (rs *RepoSyncer) force(full bool) {
