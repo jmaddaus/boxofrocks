@@ -4,6 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/jmaddaus/boxofrocks/internal/github"
 )
 
 func runInit(args []string, gf globalFlags) error {
@@ -31,7 +34,29 @@ func runInit(args []string, gf globalFlags) error {
 
 	client := newClient(gf)
 
-	// Register the repo via daemon API.
+	// Step 1: Ensure daemon is running. Auto-start in background if not.
+	if _, err := client.Health(); err != nil {
+		fmt.Println("Daemon not running. Starting in background...")
+		if startErr := runDaemonBackground(gf); startErr != nil {
+			return fmt.Errorf("auto-start daemon: %w\nStart it manually with: bor daemon start", startErr)
+		}
+		// Wait for daemon to be fully ready.
+		if err := waitForDaemon(client, 10*time.Second); err != nil {
+			return fmt.Errorf("daemon started but not responding: %w", err)
+		}
+	}
+
+	// Step 2: Check auth and provide guidance if missing.
+	if _, err := github.ResolveToken(); err != nil {
+		fmt.Println("Warning: no GitHub token found. Sync with GitHub will be disabled.")
+		fmt.Println("To enable sync, authenticate with one of:")
+		fmt.Println("  bor login              Enter a token interactively")
+		fmt.Println("  gh auth login          Use GitHub CLI")
+		fmt.Println("  export GITHUB_TOKEN=.. Set environment variable")
+		fmt.Println()
+	}
+
+	// Step 3: Register the repo via daemon API.
 	alreadyRegistered := false
 	if err := client.CreateRepo(parts[0], parts[1]); err != nil {
 		// If it already exists (409 conflict), that is acceptable.
@@ -48,7 +73,7 @@ func runInit(args []string, gf globalFlags) error {
 		}
 	}
 
-	// Trigger initial sync unless --offline.
+	// Step 4: Trigger initial sync unless --offline.
 	if !*offline {
 		if err := client.ForceSync(repo); err != nil {
 			// Non-fatal: sync might not be available.
@@ -62,7 +87,11 @@ func runInit(args []string, gf globalFlags) error {
 		}
 	}
 
-	if !gf.pretty {
+	// Step 5: Print result.
+	if gf.pretty {
+		fmt.Println()
+		fmt.Println("Ready! Run 'bor list' to see issues.")
+	} else {
 		status := "initialized"
 		if alreadyRegistered {
 			status = "already_registered"

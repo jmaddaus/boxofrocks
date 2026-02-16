@@ -632,7 +632,6 @@ func TestAddRepoStartsSyncer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
 
 	cfg := &config.Config{
 		ListenAddr: ":0",
@@ -641,7 +640,6 @@ func TestAddRepoStartsSyncer(t *testing.T) {
 	}
 
 	sm := borSync.NewSyncManager(s, noopGitHubClient{})
-	defer sm.Stop()
 
 	d := NewWithStoreAndSync(cfg, s, sm)
 
@@ -653,10 +651,8 @@ func TestAddRepoStartsSyncer(t *testing.T) {
 		t.Fatalf("create repo: expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	// Give the syncer goroutine time to start.
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify syncMgr.Status() shows the new repo.
+	// AddRepo adds the syncer to the map synchronously (under lock) before
+	// spawning the goroutine, so Status() can see it immediately.
 	status := sm.Status()
 	if len(status) != 1 {
 		t.Fatalf("expected 1 repo in sync status, got %d", len(status))
@@ -666,6 +662,11 @@ func TestAddRepoStartsSyncer(t *testing.T) {
 			t.Errorf("expected repo name 'testorg/testrepo', got %q", st.RepoName)
 		}
 	}
+
+	// Stop the sync manager before closing the store to ensure the syncer
+	// goroutine has exited and won't race with store.Close().
+	sm.Stop()
+	s.Close()
 }
 
 func TestUpdateIssueStatusToBlocked(t *testing.T) {
@@ -752,4 +753,3 @@ func TestAddRepoWithoutSyncManager(t *testing.T) {
 		t.Errorf("unexpected repo: %+v", repo)
 	}
 }
-

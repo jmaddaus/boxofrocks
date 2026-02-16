@@ -8,10 +8,7 @@ A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: 
 # Build
 go build -o bor ./cmd/bor
 
-# Start the daemon (runs in foreground)
-bor daemon start
-
-# In another terminal: initialize a repo
+# Initialize a repo (auto-starts daemon in background)
 bor init --repo owner/name
 
 # Create and manage issues
@@ -50,7 +47,7 @@ CLI (bor) ──HTTP──> Daemon ──> SQLite (local cache)
                           GitHub Action (arbiter)
 ```
 
-- **Daemon** runs in the foreground, serves a REST API on `127.0.0.1:8042`, and syncs with GitHub in the background.
+- **Daemon** serves a REST API on `127.0.0.1:8042` and syncs with GitHub in the background. Runs in background by default.
 - **CLI** talks to the daemon over HTTP. All commands work instantly from local cache.
 - **Events** are appended as GitHub Issue comments prefixed with `[boxofrocks]`. State is derived by replaying events.
 - **Arbiter** is a GitHub Action that triggers on new comments, replays events, and writes authoritative state into the issue body.
@@ -69,13 +66,23 @@ Config is stored at `~/.boxofrocks/config.json`:
 
 ## Authentication
 
-The daemon resolves a GitHub token using three methods (in order):
+The daemon resolves a GitHub token using four methods (in order):
 
 1. `GITHUB_TOKEN` environment variable
-2. `gh auth token` (GitHub CLI)
-3. `git credential fill` (git credential helper)
+2. `~/.boxofrocks/token` file (managed by `bor login`)
+3. `gh auth token` (GitHub CLI)
+4. `git credential fill` (git credential helper — works automatically with VS Code/GCM)
 
 If no token is found, the daemon starts but sync is disabled. Issues can still be created and managed locally.
+
+### Managing Tokens
+
+```bash
+bor login                  # Enter token interactively
+bor login --token ghp_...  # Provide token directly
+bor login --status         # Show which auth methods are available
+bor logout                 # Remove stored token
+```
 
 ## CLI Reference
 
@@ -89,17 +96,33 @@ If no token is found, the daemon starts but sync is disabled. Issues can still b
 
 ### Commands
 
-#### `bor daemon start`
+#### `bor daemon start [--foreground]`
 
-Start the daemon in the foreground. Use systemd, launchd, or `nohup` for background operation.
+Start the daemon in the background (default). Use `--foreground` to run in the foreground for debugging.
+
+#### `bor daemon stop`
+
+Stop the running daemon.
 
 #### `bor daemon status`
 
 Check if the daemon is running and show sync status.
 
-#### `bor init --repo owner/name [--offline]`
+#### `bor daemon logs [-f] [-n N]`
 
-Register a repository and trigger initial sync. Use `--offline` to skip GitHub validation and start with an empty state.
+View daemon logs. Use `-f` to follow output, `-n` to set number of lines (default 20).
+
+#### `bor login [--token TOK] [--status]`
+
+Authenticate with GitHub. Validates the token and saves it to `~/.boxofrocks/token`. Use `--status` to check current auth.
+
+#### `bor logout`
+
+Remove the stored GitHub token.
+
+#### `bor init [--repo owner/name] [--offline]`
+
+Initialize a repository. Auto-starts the daemon if not running, checks auth, registers the repo, and triggers initial sync. Use `--offline` to skip sync.
 
 #### `bor create "title" [-p priority] [-t type] [-d description]`
 

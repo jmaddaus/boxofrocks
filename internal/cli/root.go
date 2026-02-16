@@ -14,8 +14,10 @@ Usage:
   bor [global flags] <command> [flags]
 
 Commands:
-  daemon     Manage the daemon (start, status)
+  daemon     Manage the daemon (start, stop, status, logs)
   init       Initialize a repository
+  login      Authenticate with GitHub
+  logout     Remove stored GitHub token
   list       List issues
   create     Create an issue
   close      Close an issue
@@ -116,6 +118,10 @@ func Run(args []string, version string) error {
 		return runDaemon(subArgs, gf)
 	case "init":
 		return runInit(subArgs, gf)
+	case "login":
+		return runLogin(subArgs, gf)
+	case "logout":
+		return runLogout(subArgs, gf)
 	case "list":
 		return runList(subArgs, gf)
 	case "create":

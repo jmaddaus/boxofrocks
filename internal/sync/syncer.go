@@ -177,35 +177,42 @@ type syncRequest struct {
 
 // RepoSyncer runs a sync loop for a single repository.
 type RepoSyncer struct {
-	repo          *model.RepoConfig
-	store         store.Store
-	ghClient      github.Client
-	manager       *SyncManager // back-reference for rate limit
-	interval      time.Duration
-	forceCh       chan syncRequest
-	stopCh        chan struct{}
-	status        SyncStatus
-	mu            sync.RWMutex
-	labelEnsured  bool
+	repo         *model.RepoConfig
+	store        store.Store
+	ghClient     github.Client
+	manager      *SyncManager // back-reference for rate limit
+	interval     time.Duration
+	forceCh      chan syncRequest
+	stopCh       chan struct{}
+	doneCh       chan struct{} // closed when run() exits
+	status       SyncStatus
+	mu           sync.RWMutex
+	labelEnsured bool
 }
 
 func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr *SyncManager, interval time.Duration) *RepoSyncer {
+	// Copy the repo config so the syncer owns its own copy and doesn't
+	// race with callers who hold the original pointer.
+	repoCopy := *repo
 	return &RepoSyncer{
-		repo:     repo,
+		repo:     &repoCopy,
 		store:    s,
 		ghClient: gh,
 		manager:  mgr,
 		interval: interval,
 		forceCh:  make(chan syncRequest, 1),
 		stopCh:   make(chan struct{}),
+		doneCh:   make(chan struct{}),
 		status: SyncStatus{
-			RepoName:   repo.FullName(),
-			LastSyncAt: repo.LastSyncAt,
+			RepoName:   repoCopy.FullName(),
+			LastSyncAt: repoCopy.LastSyncAt,
 		},
 	}
 }
 
 func (rs *RepoSyncer) run(startDelay time.Duration) {
+	defer close(rs.doneCh)
+
 	if startDelay > 0 {
 		select {
 		case <-time.After(startDelay):
@@ -232,6 +239,7 @@ func (rs *RepoSyncer) run(startDelay time.Duration) {
 	}
 }
 
+// stop signals the syncer goroutine to exit and waits for it to finish.
 func (rs *RepoSyncer) stop() {
 	select {
 	case <-rs.stopCh:
@@ -239,6 +247,7 @@ func (rs *RepoSyncer) stop() {
 	default:
 		close(rs.stopCh)
 	}
+	<-rs.doneCh
 }
 
 func (rs *RepoSyncer) force(full bool) {

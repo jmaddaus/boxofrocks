@@ -31,8 +31,8 @@ type mockGitHubClient struct {
 	comments map[string][]*github.GitHubComment
 
 	// Track calls for assertions.
-	createdIssues   []createdIssueRecord
-	createdComments []createdCommentRecord
+	createdIssues    []createdIssueRecord
+	createdComments  []createdCommentRecord
 	createLabelCalls []createLabelRecord
 
 	nextIssueNumber int

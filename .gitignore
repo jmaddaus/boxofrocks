@@ -1,7 +1,7 @@
 # Compiled binaries
-/at
+/bin/
+/bor
 /reconcile
-reconcile-linux-amd64
 
 # OS files
 .DS_Store

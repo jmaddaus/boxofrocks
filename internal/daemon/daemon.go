@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -91,10 +94,64 @@ func (d *Daemon) StartedAt() time.Time {
 	return d.startedAt
 }
 
+// PIDFilePath returns the path to the daemon PID file.
+func PIDFilePath(cfg *config.Config) string {
+	return filepath.Join(cfg.DataDir, "daemon.pid")
+}
+
+// LogFilePath returns the path to the daemon log file.
+func LogFilePath(cfg *config.Config) string {
+	return filepath.Join(cfg.DataDir, "daemon.log")
+}
+
+// ReadPIDFile reads the PID from the daemon PID file. Returns 0 if not found.
+func ReadPIDFile(cfg *config.Config) (int, error) {
+	data, err := os.ReadFile(PIDFilePath(cfg))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("invalid PID file content: %w", err)
+	}
+	return pid, nil
+}
+
+// writePIDFile writes the current process PID to the PID file.
+func writePIDFile(cfg *config.Config) error {
+	return os.WriteFile(PIDFilePath(cfg), []byte(strconv.Itoa(os.Getpid())+"\n"), 0644)
+}
+
+// removePIDFile removes the PID file.
+func removePIDFile(cfg *config.Config) {
+	os.Remove(PIDFilePath(cfg))
+}
+
 // Run starts the HTTP server and blocks until a SIGINT or SIGTERM is received
-// or the provided context is cancelled.
+// or the provided context is cancelled. It uses split Listen/Serve so the PID
+// file is written only after successful port bind.
 func (d *Daemon) Run(ctx context.Context) error {
 	d.startedAt = time.Now()
+
+	// Bind the port first so we fail fast on EADDRINUSE.
+	ln, err := net.Listen("tcp", d.cfg.ListenAddr)
+	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && errors.Is(opErr.Err, syscall.EADDRINUSE) {
+			return fmt.Errorf("port %s already in use; is another daemon running?", d.cfg.ListenAddr)
+		}
+		return fmt.Errorf("listen: %w", err)
+	}
+
+	// Write PID file now that we've bound the port.
+	if err := writePIDFile(d.cfg); err != nil {
+		ln.Close()
+		return fmt.Errorf("write PID file: %w", err)
+	}
+	defer removePIDFile(d.cfg)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -105,7 +162,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("boxofrocks daemon listening", "addr", d.cfg.ListenAddr)
-		if err := d.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := d.server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 		close(errCh)
@@ -118,10 +175,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 		slog.Info("received signal, shutting down...", "signal", sig)
 	case err := <-errCh:
 		if err != nil {
-			var opErr *net.OpError
-			if errors.As(err, &opErr) && errors.Is(opErr.Err, syscall.EADDRINUSE) {
-				return fmt.Errorf("port %s already in use; is another daemon running?", d.cfg.ListenAddr)
-			}
 			return fmt.Errorf("server error: %w", err)
 		}
 	}
