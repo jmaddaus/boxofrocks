@@ -70,14 +70,28 @@ func (s *SQLiteStore) GetRepo(ctx context.Context, id int) (*model.RepoConfig, e
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, trusted_authors_only, local_path, socket_enabled, queue_enabled, created_at
 		 FROM repos WHERE id = ?`, id)
-	return scanRepo(row)
+	repo, err := scanRepo(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadLocalPaths(ctx, repo); err != nil {
+		return nil, err
+	}
+	return repo, nil
 }
 
 func (s *SQLiteStore) GetRepoByName(ctx context.Context, owner, name string) (*model.RepoConfig, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, trusted_authors_only, local_path, socket_enabled, queue_enabled, created_at
 		 FROM repos WHERE owner = ? AND name = ?`, owner, name)
-	return scanRepo(row)
+	repo, err := scanRepo(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadLocalPaths(ctx, repo); err != nil {
+		return nil, err
+	}
+	return repo, nil
 }
 
 func (s *SQLiteStore) ListRepos(ctx context.Context) ([]*model.RepoConfig, error) {
@@ -97,7 +111,112 @@ func (s *SQLiteStore) ListRepos(ctx context.Context) ([]*model.RepoConfig, error
 		}
 		repos = append(repos, r)
 	}
-	return repos, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, repo := range repos {
+		if err := s.loadLocalPaths(ctx, repo); err != nil {
+			return nil, err
+		}
+	}
+	return repos, nil
+}
+
+// loadLocalPaths populates repo.LocalPaths from the repo_local_paths table
+// and back-fills the legacy LocalPath/SocketEnabled/QueueEnabled fields from the first entry.
+func (s *SQLiteStore) loadLocalPaths(ctx context.Context, repo *model.RepoConfig) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, repo_id, local_path, socket_enabled, queue_enabled FROM repo_local_paths WHERE repo_id = ? ORDER BY id`, repo.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var paths []model.LocalPathConfig
+	for rows.Next() {
+		var lp model.LocalPathConfig
+		var socketInt, queueInt int
+		if err := rows.Scan(&lp.ID, &lp.RepoID, &lp.LocalPath, &socketInt, &queueInt); err != nil {
+			return err
+		}
+		lp.SocketEnabled = socketInt != 0
+		lp.QueueEnabled = queueInt != 0
+		paths = append(paths, lp)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	repo.LocalPaths = paths
+	// Back-fill legacy fields from first entry.
+	if len(paths) > 0 {
+		repo.LocalPath = paths[0].LocalPath
+		repo.SocketEnabled = paths[0].SocketEnabled
+		repo.QueueEnabled = paths[0].QueueEnabled
+	}
+	return nil
+}
+
+func (s *SQLiteStore) AddLocalPath(ctx context.Context, repoID int, localPath string, socket, queue bool) (*model.LocalPathConfig, error) {
+	socketInt := 0
+	if socket {
+		socketInt = 1
+	}
+	queueInt := 0
+	if queue {
+		queueInt = 1
+	}
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO repo_local_paths (repo_id, local_path, socket_enabled, queue_enabled)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(local_path) DO UPDATE SET socket_enabled=excluded.socket_enabled, queue_enabled=excluded.queue_enabled`,
+		repoID, localPath, socketInt, queueInt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read back the row.
+	var lp model.LocalPathConfig
+	var sInt, qInt int
+	err = s.db.QueryRowContext(ctx,
+		`SELECT id, repo_id, local_path, socket_enabled, queue_enabled FROM repo_local_paths WHERE local_path = ?`,
+		localPath).Scan(&lp.ID, &lp.RepoID, &lp.LocalPath, &sInt, &qInt)
+	if err != nil {
+		return nil, err
+	}
+	lp.SocketEnabled = sInt != 0
+	lp.QueueEnabled = qInt != 0
+	return &lp, nil
+}
+
+func (s *SQLiteStore) RemoveLocalPath(ctx context.Context, repoID int, localPath string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM repo_local_paths WHERE repo_id = ? AND local_path = ?`,
+		repoID, localPath)
+	return err
+}
+
+func (s *SQLiteStore) ListLocalPaths(ctx context.Context, repoID int) ([]model.LocalPathConfig, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, repo_id, local_path, socket_enabled, queue_enabled FROM repo_local_paths WHERE repo_id = ? ORDER BY id`, repoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var paths []model.LocalPathConfig
+	for rows.Next() {
+		var lp model.LocalPathConfig
+		var socketInt, queueInt int
+		if err := rows.Scan(&lp.ID, &lp.RepoID, &lp.LocalPath, &socketInt, &queueInt); err != nil {
+			return nil, err
+		}
+		lp.SocketEnabled = socketInt != 0
+		lp.QueueEnabled = queueInt != 0
+		paths = append(paths, lp)
+	}
+	return paths, rows.Err()
 }
 
 func (s *SQLiteStore) UpdateRepo(ctx context.Context, repo *model.RepoConfig) error {

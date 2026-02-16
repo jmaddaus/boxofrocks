@@ -191,6 +191,15 @@ func (d *Daemon) CreateSocketForRepo(repo *model.RepoConfig) error {
 	if sockPath == "" {
 		return nil
 	}
+	return d.createSocketAtPath(repo.ID, sockPath)
+}
+
+// createSocketAtPath creates a Unix domain socket listener at the given path
+// associated with the given repo ID. Safe to call multiple times.
+func (d *Daemon) createSocketAtPath(repoID int, sockPath string) error {
+	if sockPath == "" {
+		return nil
+	}
 
 	d.socketMu.Lock()
 	defer d.socketMu.Unlock()
@@ -221,7 +230,7 @@ func (d *Daemon) CreateSocketForRepo(repo *model.RepoConfig) error {
 	}
 
 	d.socketLns[sockPath] = ln
-	d.socketRepos[sockPath] = repo.ID
+	d.socketRepos[sockPath] = repoID
 
 	go func() {
 		if err := d.server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -258,7 +267,7 @@ func (d *Daemon) cleanupSockets() {
 	d.socketRepos = make(map[string]int)
 }
 
-// startRepoSockets iterates registered repos and creates sockets for those with SocketEnabled.
+// startRepoSockets iterates registered repos and creates sockets for all local paths with SocketEnabled.
 func (d *Daemon) startRepoSockets() {
 	repos, err := d.store.ListRepos(context.Background())
 	if err != nil {
@@ -266,9 +275,11 @@ func (d *Daemon) startRepoSockets() {
 		return
 	}
 	for _, repo := range repos {
-		if repo.SocketEnabled && repo.LocalPath != "" {
-			if err := d.CreateSocketForRepo(repo); err != nil {
-				slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+		for _, lp := range repo.LocalPaths {
+			if sp := lp.SocketPath(); sp != "" {
+				if err := d.createSocketAtPath(repo.ID, sp); err != nil {
+					slog.Warn("could not create socket for repo", "repo", repo.FullName(), "path", lp.LocalPath, "error", err)
+				}
 			}
 		}
 	}
@@ -301,26 +312,30 @@ func (d *Daemon) checkArbiterVersions() {
 	}
 
 	for _, repo := range repos {
-		if repo.LocalPath == "" {
-			continue
+		// Find the first local path that has a workflow file.
+		var workflowPath string
+		for _, lp := range repo.LocalPaths {
+			if lp.LocalPath == "" {
+				continue
+			}
+			arbiterPath := filepath.Join(lp.LocalPath, ".github", "workflows", "arbiter.yml")
+			reconcilePath := filepath.Join(lp.LocalPath, ".github", "workflows", "reconcile.yml")
+			if _, err := os.Stat(arbiterPath); err == nil {
+				workflowPath = arbiterPath
+				break
+			} else if _, err := os.Stat(reconcilePath); err == nil {
+				workflowPath = reconcilePath
+				break
+			}
 		}
 
-		// Look for arbiter.yml first, then reconcile.yml.
-		arbiterPath := filepath.Join(repo.LocalPath, ".github", "workflows", "arbiter.yml")
-		reconcilePath := filepath.Join(repo.LocalPath, ".github", "workflows", "reconcile.yml")
-
-		workflowPath := ""
-		if _, err := os.Stat(arbiterPath); err == nil {
-			workflowPath = arbiterPath
-		} else if _, err := os.Stat(reconcilePath); err == nil {
-			workflowPath = reconcilePath
-		}
-
-		if workflowPath == "" {
+		if len(repo.LocalPaths) > 0 && workflowPath == "" {
 			slog.Warn("arbiter workflow not found",
 				"repo", repo.FullName(),
-				"path", arbiterPath,
 				"hint", "run 'bor init' to create")
+			continue
+		}
+		if workflowPath == "" {
 			continue
 		}
 
