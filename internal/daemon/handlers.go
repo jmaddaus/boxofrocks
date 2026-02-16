@@ -95,7 +95,7 @@ func (d *Daemon) resolveRepo(r *http.Request) (*model.RepoConfig, error) {
 	}
 
 	// 4. Working directory: if the CLI sent X-Working-Dir, match it against
-	// registered repos' LocalPath (exact match or subdirectory).
+	// registered repos' local paths (exact match or subdirectory).
 	if workDir := r.Header.Get("X-Working-Dir"); workDir != "" {
 		repos, err := d.store.ListRepos(ctx)
 		if err != nil {
@@ -104,15 +104,15 @@ func (d *Daemon) resolveRepo(r *http.Request) (*model.RepoConfig, error) {
 		var best *model.RepoConfig
 		bestLen := 0
 		for _, repo := range repos {
-			if repo.LocalPath == "" {
-				continue
-			}
-			// Match if workDir is exactly LocalPath or a subdirectory of it.
-			lp := repo.LocalPath
-			if workDir == lp || strings.HasPrefix(workDir, lp+"/") {
-				if len(lp) > bestLen {
-					best = repo
-					bestLen = len(lp)
+			for _, lp := range repo.LocalPaths {
+				if lp.LocalPath == "" {
+					continue
+				}
+				if workDir == lp.LocalPath || strings.HasPrefix(workDir, lp.LocalPath+"/") {
+					if len(lp.LocalPath) > bestLen {
+						best = repo
+						bestLen = len(lp.LocalPath)
+					}
 				}
 			}
 		}
@@ -260,27 +260,25 @@ func (d *Daemon) addRepo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enable Unix domain socket and/or file queue if requested.
-	if req.LocalPath != "" || req.Socket || req.Queue {
-		if req.LocalPath != "" {
-			repo.LocalPath = req.LocalPath
-		}
-		repo.SocketEnabled = req.Socket
-		repo.QueueEnabled = req.Queue
-		if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
-			slog.Warn("could not save socket/queue settings", "repo", repo.FullName(), "error", err)
+	// Register local path with socket/queue if requested.
+	if req.LocalPath != "" {
+		lp, err := d.store.AddLocalPath(r.Context(), repo.ID, req.LocalPath, req.Socket, req.Queue)
+		if err != nil {
+			slog.Warn("could not save local path", "repo", repo.FullName(), "error", err)
 		} else {
-			if repo.SocketEnabled && repo.LocalPath != "" {
-				if err := d.CreateSocketForRepo(repo); err != nil {
+			if sp := lp.SocketPath(); sp != "" {
+				if err := d.createSocketAtPath(repo.ID, sp); err != nil {
 					slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
 				}
 			}
-			if repo.QueueEnabled && repo.LocalPath != "" {
-				if err := d.startFileQueue(repo); err != nil {
+			if qd := lp.QueueDir(); qd != "" {
+				if err := d.startFileQueueAtPath(repo.ID, qd); err != nil {
 					slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
 				}
 			}
 		}
+		// Re-fetch repo to get updated local paths.
+		repo, _ = d.store.GetRepo(r.Context(), repo.ID)
 	}
 
 	if d.syncMgr != nil {
@@ -885,49 +883,163 @@ func (d *Daemon) updateRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle trusted_authors_only via the repos table.
 	if req.TrustedAuthorsOnly != nil {
 		repo.TrustedAuthorsOnly = *req.TrustedAuthorsOnly
-	}
-	if req.LocalPath != nil {
-		repo.LocalPath = *req.LocalPath
-	}
-
-	oldSocketEnabled := repo.SocketEnabled
-	if req.SocketEnabled != nil {
-		repo.SocketEnabled = *req.SocketEnabled
-	}
-
-	oldQueueEnabled := repo.QueueEnabled
-	if req.QueueEnabled != nil {
-		repo.QueueEnabled = *req.QueueEnabled
-	}
-
-	if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
-		writeError(w, http.StatusInternalServerError, "update repo: "+err.Error())
-		return
-	}
-
-	// Toggle socket on/off as needed.
-	if repo.SocketEnabled && repo.LocalPath != "" && !oldSocketEnabled {
-		if err := d.CreateSocketForRepo(repo); err != nil {
-			slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+		if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
+			writeError(w, http.StatusInternalServerError, "update repo: "+err.Error())
+			return
 		}
-	} else if !repo.SocketEnabled && oldSocketEnabled && repo.LocalPath != "" {
-		sockPath := filepath.Join(repo.LocalPath, ".boxofrocks", "bor.sock")
-		d.removeSocket(sockPath)
 	}
 
-	// Toggle file queue on/off as needed.
-	if repo.QueueEnabled && repo.LocalPath != "" && !oldQueueEnabled {
-		if err := d.startFileQueue(repo); err != nil {
-			slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
+	// Handle local_path/socket/queue via the local paths table.
+	hasPathChange := req.LocalPath != nil || req.SocketEnabled != nil || req.QueueEnabled != nil
+	if hasPathChange {
+		// Determine the target local path: explicit or from the first existing entry.
+		targetPath := ""
+		if req.LocalPath != nil && *req.LocalPath != "" {
+			targetPath = *req.LocalPath
+		} else if len(repo.LocalPaths) > 0 {
+			targetPath = repo.LocalPaths[0].LocalPath
 		}
-	} else if !repo.QueueEnabled && oldQueueEnabled && repo.LocalPath != "" {
-		queueDir := filepath.Join(repo.LocalPath, ".boxofrocks", "queue")
-		d.stopFileQueue(queueDir)
+		if targetPath != "" {
+			// Determine socket/queue flags: explicit or from existing entry.
+			socket := false
+			queue := false
+			for _, lp := range repo.LocalPaths {
+				if lp.LocalPath == targetPath {
+					socket = lp.SocketEnabled
+					queue = lp.QueueEnabled
+					break
+				}
+			}
+			if req.SocketEnabled != nil {
+				socket = *req.SocketEnabled
+			}
+			if req.QueueEnabled != nil {
+				queue = *req.QueueEnabled
+			}
+			lp, err := d.store.AddLocalPath(r.Context(), repo.ID, targetPath, socket, queue)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "add local path: "+err.Error())
+				return
+			}
+			// Toggle socket on/off.
+			sockPath := filepath.Join(targetPath, ".boxofrocks", "bor.sock")
+			if lp.SocketEnabled {
+				if err := d.createSocketAtPath(repo.ID, sockPath); err != nil {
+					slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+				}
+			} else {
+				d.removeSocket(sockPath)
+			}
+			// Toggle queue on/off.
+			queueDir := filepath.Join(targetPath, ".boxofrocks", "queue")
+			if lp.QueueEnabled {
+				if err := d.startFileQueueAtPath(repo.ID, queueDir); err != nil {
+					slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
+				}
+			} else {
+				d.stopFileQueue(queueDir)
+			}
+		}
 	}
 
 	// Re-fetch to return canonical state.
+	repo, err = d.store.GetRepo(r.Context(), repo.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, repo)
+}
+
+// ---------------------------------------------------------------------------
+// Repo local paths (worktree support)
+// ---------------------------------------------------------------------------
+
+type repoPathRequest struct {
+	LocalPath     string `json:"local_path"`
+	SocketEnabled bool   `json:"socket_enabled"`
+	QueueEnabled  bool   `json:"queue_enabled"`
+}
+
+func (d *Daemon) addRepoPath(w http.ResponseWriter, r *http.Request) {
+	repo, err := d.resolveRepo(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var req repoPathRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.LocalPath == "" {
+		writeError(w, http.StatusBadRequest, "local_path is required")
+		return
+	}
+
+	lp, err := d.store.AddLocalPath(r.Context(), repo.ID, req.LocalPath, req.SocketEnabled, req.QueueEnabled)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "add local path: "+err.Error())
+		return
+	}
+
+	if sp := lp.SocketPath(); sp != "" {
+		if err := d.createSocketAtPath(repo.ID, sp); err != nil {
+			slog.Warn("could not create socket", "path", sp, "error", err)
+		}
+	}
+	if qd := lp.QueueDir(); qd != "" {
+		if err := d.startFileQueueAtPath(repo.ID, qd); err != nil {
+			slog.Warn("could not start file queue", "dir", qd, "error", err)
+		}
+	}
+
+	// Re-fetch repo to return updated state.
+	repo, err = d.store.GetRepo(r.Context(), repo.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, repo)
+}
+
+func (d *Daemon) removeRepoPath(w http.ResponseWriter, r *http.Request) {
+	repo, err := d.resolveRepo(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var req struct {
+		LocalPath string `json:"local_path"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.LocalPath == "" {
+		writeError(w, http.StatusBadRequest, "local_path is required")
+		return
+	}
+
+	// Clean up socket and queue for this path.
+	sockPath := filepath.Join(req.LocalPath, ".boxofrocks", "bor.sock")
+	d.removeSocket(sockPath)
+	queueDir := filepath.Join(req.LocalPath, ".boxofrocks", "queue")
+	d.stopFileQueue(queueDir)
+
+	if err := d.store.RemoveLocalPath(r.Context(), repo.ID, req.LocalPath); err != nil {
+		writeError(w, http.StatusInternalServerError, "remove local path: "+err.Error())
+		return
+	}
+
+	// Re-fetch repo to return updated state.
 	repo, err = d.store.GetRepo(r.Context(), repo.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

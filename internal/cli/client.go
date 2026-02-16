@@ -298,6 +298,40 @@ func (c *Client) UpdateRepo(repo string, fields map[string]interface{}) (*model.
 	return &rc, nil
 }
 
+// AddRepoPath registers a local path (worktree) for a repo.
+func (c *Client) AddRepoPath(repo string, body map[string]interface{}) (*model.RepoConfig, error) {
+	path := "/repos/paths"
+	if repo != "" {
+		path += "?repo=" + repo
+	}
+	resp, err := c.Do("POST", path, body)
+	if err != nil {
+		return nil, err
+	}
+	var rc model.RepoConfig
+	if err := decodeOrError(resp, &rc); err != nil {
+		return nil, err
+	}
+	return &rc, nil
+}
+
+// RemoveRepoPath removes a local path (worktree) from a repo.
+func (c *Client) RemoveRepoPath(repo string, body map[string]interface{}) (*model.RepoConfig, error) {
+	path := "/repos/paths"
+	if repo != "" {
+		path += "?repo=" + repo
+	}
+	resp, err := c.Do("DELETE", path, body)
+	if err != nil {
+		return nil, err
+	}
+	var rc model.RepoConfig
+	if err := decodeOrError(resp, &rc); err != nil {
+		return nil, err
+	}
+	return &rc, nil
+}
+
 // ForceSync triggers a sync for the given repo.
 func (c *Client) ForceSync(repo string) error {
 	path := "/sync"

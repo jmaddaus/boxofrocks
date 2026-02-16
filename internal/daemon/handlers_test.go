@@ -1098,3 +1098,141 @@ func TestUpdateRepoTrustedAuthorsOnly(t *testing.T) {
 		t.Error("expected trusted_authors_only=false")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Repo local paths (worktree support)
+// ---------------------------------------------------------------------------
+
+func TestAddRepoPath(t *testing.T) {
+	d := testDaemon(t)
+
+	// Register a repo.
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+
+	// Add a local path.
+	rr := doRequest(t, d, "POST", "/repos/paths?repo=o/r", map[string]interface{}{
+		"local_path":     "/tmp/worktree-a",
+		"socket_enabled": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("add repo path: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if len(repo.LocalPaths) != 1 {
+		t.Fatalf("expected 1 local path, got %d", len(repo.LocalPaths))
+	}
+	if repo.LocalPaths[0].LocalPath != "/tmp/worktree-a" {
+		t.Errorf("expected '/tmp/worktree-a', got %q", repo.LocalPaths[0].LocalPath)
+	}
+	if !repo.LocalPaths[0].SocketEnabled {
+		t.Error("expected socket_enabled=true on local path")
+	}
+
+	// Add a second local path.
+	rr = doRequest(t, d, "POST", "/repos/paths?repo=o/r", map[string]interface{}{
+		"local_path":    "/tmp/worktree-b",
+		"queue_enabled": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("add second path: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	decodeJSON(t, rr, &repo)
+	if len(repo.LocalPaths) != 2 {
+		t.Fatalf("expected 2 local paths, got %d", len(repo.LocalPaths))
+	}
+}
+
+func TestRemoveRepoPath(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+
+	// Add two paths.
+	doRequest(t, d, "POST", "/repos/paths?repo=o/r", map[string]interface{}{
+		"local_path": "/tmp/worktree-a",
+	})
+	doRequest(t, d, "POST", "/repos/paths?repo=o/r", map[string]interface{}{
+		"local_path": "/tmp/worktree-b",
+	})
+
+	// Remove one.
+	rr := doRequest(t, d, "DELETE", "/repos/paths?repo=o/r", map[string]interface{}{
+		"local_path": "/tmp/worktree-a",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("remove repo path: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if len(repo.LocalPaths) != 1 {
+		t.Fatalf("expected 1 local path after removal, got %d", len(repo.LocalPaths))
+	}
+	if repo.LocalPaths[0].LocalPath != "/tmp/worktree-b" {
+		t.Errorf("expected '/tmp/worktree-b', got %q", repo.LocalPaths[0].LocalPath)
+	}
+}
+
+func TestResolveRepoMultiplePaths(t *testing.T) {
+	d := testDaemon(t)
+
+	// Register two repos.
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "repo1"})
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "repo2"})
+
+	// Add local paths for each.
+	doRequest(t, d, "POST", "/repos/paths?repo=o/repo1", map[string]interface{}{
+		"local_path": "/home/user/repo1/main",
+	})
+	doRequest(t, d, "POST", "/repos/paths?repo=o/repo1", map[string]interface{}{
+		"local_path": "/home/user/repo1/feature-branch",
+	})
+	doRequest(t, d, "POST", "/repos/paths?repo=o/repo2", map[string]interface{}{
+		"local_path": "/home/user/repo2",
+	})
+
+	// Request from repo1 main worktree.
+	rr := doRequestWithHeader(t, d, "GET", "/issues", "X-Working-Dir", "/home/user/repo1/main", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list issues: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Request from repo1 feature-branch worktree subdirectory.
+	rr = doRequestWithHeader(t, d, "GET", "/issues", "X-Working-Dir", "/home/user/repo1/feature-branch/src", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list issues from subdir: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Request from repo2.
+	rr = doRequestWithHeader(t, d, "GET", "/issues", "X-Working-Dir", "/home/user/repo2", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list issues repo2: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAddRepoPathCreatesSocket(t *testing.T) {
+	d := testDaemon(t)
+	tmpDir := t.TempDir()
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+
+	rr := doRequest(t, d, "POST", "/repos/paths?repo=o/r", map[string]interface{}{
+		"local_path":     tmpDir,
+		"socket_enabled": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("add repo path: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Check that a socket was created.
+	d.socketMu.Lock()
+	sockCount := len(d.socketLns)
+	d.socketMu.Unlock()
+
+	if sockCount == 0 {
+		t.Error("expected at least one socket listener to be created")
+	}
+}

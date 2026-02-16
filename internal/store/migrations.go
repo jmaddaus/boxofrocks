@@ -8,7 +8,7 @@ import (
 
 // DBSchemaVersion is the current database schema version.
 // Bump this when adding migrations that change the schema.
-const DBSchemaVersion = 4
+const DBSchemaVersion = 5
 
 // downMigrations maps a version to the SQL needed to reverse it.
 // Version N's entry contains statements that undo the changes introduced
@@ -179,6 +179,26 @@ func runMigrations(db *sql.DB) error {
 	for _, m := range alterMigrations {
 		if err := alterColumn(db, m); err != nil {
 			return err
+		}
+	}
+
+	// Version 5: repo_local_paths junction table for multiple worktrees per repo.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS repo_local_paths (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		repo_id INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+		local_path TEXT NOT NULL,
+		socket_enabled INTEGER DEFAULT 0,
+		queue_enabled INTEGER DEFAULT 0,
+		UNIQUE(local_path)
+	)`); err != nil {
+		return fmt.Errorf("create repo_local_paths: %w", err)
+	}
+
+	// Migrate existing local_path data from repos table (only on upgrade from v4).
+	if dbVersion < 5 {
+		if _, err := db.Exec(`INSERT OR IGNORE INTO repo_local_paths (repo_id, local_path, socket_enabled, queue_enabled)
+			SELECT id, local_path, socket_enabled, queue_enabled FROM repos WHERE local_path != ''`); err != nil {
+			return fmt.Errorf("migrate repo local paths: %w", err)
 		}
 	}
 

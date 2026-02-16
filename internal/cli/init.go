@@ -143,18 +143,14 @@ func runInit(args []string, gf globalFlags) error {
 		if gf.pretty {
 			fmt.Printf("Repository %s already registered.\n", repo)
 		}
-		// Always update local_path; enable socket/queue if flags were requested.
-		updateBody := map[string]interface{}{
-			"local_path": localPath,
+		// Add this local path (worktree) to the repo; does not overwrite existing paths.
+		pathBody := map[string]interface{}{
+			"local_path":     localPath,
+			"socket_enabled": *socketFlag,
+			"queue_enabled":  *jsonFlag,
 		}
-		if *socketFlag {
-			updateBody["socket_enabled"] = true
-		}
-		if *jsonFlag {
-			updateBody["queue_enabled"] = true
-		}
-		if _, updateErr := client.UpdateRepo(repo, updateBody); updateErr != nil {
-			return fmt.Errorf("update repo: %w", updateErr)
+		if _, addErr := client.AddRepoPath(repo, pathBody); addErr != nil {
+			return fmt.Errorf("add local path: %w", addErr)
 		}
 		if gf.pretty && *socketFlag {
 			fmt.Println("Unix socket enabled.")

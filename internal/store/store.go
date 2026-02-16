@@ -24,6 +24,11 @@ type Store interface {
 	ListRepos(ctx context.Context) ([]*model.RepoConfig, error)
 	UpdateRepo(ctx context.Context, repo *model.RepoConfig) error
 
+	// Local paths (worktree support)
+	AddLocalPath(ctx context.Context, repoID int, localPath string, socket, queue bool) (*model.LocalPathConfig, error)
+	RemoveLocalPath(ctx context.Context, repoID int, localPath string) error
+	ListLocalPaths(ctx context.Context, repoID int) ([]model.LocalPathConfig, error)
+
 	// Issues
 	CreateIssue(ctx context.Context, issue *model.Issue) (*model.Issue, error)
 	GetIssue(ctx context.Context, id int) (*model.Issue, error)
