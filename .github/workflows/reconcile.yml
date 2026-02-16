@@ -1,0 +1,16 @@
+  name: Reconcile BoxOfRocks                                                                                            
+                                                                  
+  on:                                                                                                                   
+    issue_comment:                                                
+      types: [created]
+
+  jobs:
+    reconcile:
+      if: contains(github.event.comment.body, '[boxofrocks]')
+      runs-on: ubuntu-latest
+      steps:
+        - uses: jmaddaus/boxofrocks/arbiter@main
+          with:
+            issue-number: ${{ github.event.issue.number }}
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
