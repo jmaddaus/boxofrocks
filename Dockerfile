@@ -29,4 +29,4 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD wget -qO- http://localhost:8042/health || exit 1
 
 ENTRYPOINT ["bor"]
-CMD ["daemon", "start"]
+CMD ["daemon", "start", "--foreground"]
