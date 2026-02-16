@@ -434,3 +434,42 @@ func TestCreateIssue_ErrorStatus(t *testing.T) {
 		t.Fatal("expected error for 422 response")
 	}
 }
+
+func TestUpdateIssueState_Success(t *testing.T) {
+	ts, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Errorf("expected PATCH, got %s", r.Method)
+		}
+		if r.URL.Path != "/repos/owner/repo/issues/42" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		var payload map[string]string
+		json.NewDecoder(r.Body).Decode(&payload)
+		if payload["state"] != "closed" {
+			t.Errorf("expected state 'closed', got %v", payload["state"])
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	})
+	defer ts.Close()
+
+	err := client.UpdateIssueState(context.Background(), "owner", "repo", 42, "closed")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUpdateIssueState_Error(t *testing.T) {
+	ts, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"Not Found"}`))
+	})
+	defer ts.Close()
+
+	err := client.UpdateIssueState(context.Background(), "owner", "repo", 999, "open")
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+}

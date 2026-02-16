@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Box of Rocks</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --bg2: #fff;
+    --fg: #1a1a1a;
+    --fg2: #555;
+    --border: #ddd;
+    --accent: #0969da;
+    --row-hover: #f0f4f8;
+    --badge-open: #1a7f37;
+    --badge-closed: #6e7781;
+    --badge-progress: #9a6700;
+    --badge-blocked: #cf222e;
+    --badge-review: #8250df;
+    --badge-deleted: #6e7781;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg2: #161b22;
+      --fg: #e6edf3;
+      --fg2: #8b949e;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --row-hover: #1c2128;
+      --badge-open: #3fb950;
+      --badge-closed: #8b949e;
+      --badge-progress: #d29922;
+      --badge-blocked: #f85149;
+      --badge-review: #bc8cff;
+      --badge-deleted: #8b949e;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.5;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+  header h1 { font-size: 16px; font-weight: 600; white-space: nowrap; }
+  header .spacer { flex: 1; }
+  .sync-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--fg2);
+  }
+  .sync-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--badge-open);
+  }
+  .sync-dot.error { background: var(--badge-blocked); }
+  .sync-dot.syncing { background: var(--badge-progress); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    flex-wrap: wrap;
+  }
+  .toolbar label {
+    font-size: 11px;
+    color: var(--fg2);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .toolbar select, .toolbar input {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  .toolbar select { cursor: pointer; }
+  .toolbar input { width: 120px; }
+
+  .content { padding: 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  thead th {
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--fg2);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  thead th:hover { color: var(--fg); }
+  tbody tr {
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr.selected { background: var(--row-hover); }
+  tbody td {
+    padding: 6px 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  td.title-col {
+    white-space: normal;
+    max-width: 400px;
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #fff;
+  }
+  .status-open { background: var(--badge-open); }
+  .status-in_progress { background: var(--badge-progress); }
+  .status-blocked { background: var(--badge-blocked); }
+  .status-in_review { background: var(--badge-review); }
+  .status-closed { background: var(--badge-closed); }
+  .status-deleted { background: var(--badge-deleted); }
+
+  .type-badge {
+    font-size: 11px;
+    color: var(--fg2);
+  }
+
+  .detail-panel {
+    border-top: 2px solid var(--accent);
+    background: var(--bg2);
+    padding: 20px;
+    display: none;
+  }
+  .detail-panel.open { display: block; }
+  .detail-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .detail-header h2 { font-size: 15px; font-weight: 600; }
+  .detail-header .issue-id { color: var(--fg2); font-size: 13px; }
+  .detail-meta {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--fg2);
+  }
+  .detail-meta span strong { color: var(--fg); }
+  .detail-description {
+    padding: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 16px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .detail-labels { margin-bottom: 16px; }
+  .label-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    border: 1px solid var(--border);
+    margin-right: 4px;
+    color: var(--fg2);
+  }
+  .comments-section h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--fg2);
+    margin-bottom: 8px;
+  }
+  .comment {
+    padding: 8px 12px;
+    border-left: 3px solid var(--border);
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+  .comment .comment-meta {
+    color: var(--fg2);
+    margin-bottom: 2px;
+  }
+  .comment .comment-text { white-space: pre-wrap; word-break: break-word; }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--fg2);
+  }
+  .empty-state p { margin-top: 8px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Box of Rocks</h1>
+  <div class="spacer"></div>
+  <div>
+    <label for="repo-select" style="font-size:11px;color:var(--fg2);margin-right:4px;">Repo:</label>
+    <select id="repo-select"></select>
+  </div>
+  <div class="sync-indicator">
+    <span class="sync-dot" id="sync-dot"></span>
+    <span id="sync-label">ok</span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <label for="filter-status">Status:</label>
+  <select id="filter-status">
+    <option value="">All</option>
+    <option value="open">open</option>
+    <option value="in_progress">in_progress</option>
+    <option value="blocked">blocked</option>
+    <option value="in_review">in_review</option>
+    <option value="closed">closed</option>
+  </select>
+  <label for="filter-type">Type:</label>
+  <select id="filter-type">
+    <option value="">All</option>
+    <option value="task">task</option>
+    <option value="bug">bug</option>
+    <option value="feature">feature</option>
+    <option value="epic">epic</option>
+  </select>
+  <label for="filter-owner">Owner:</label>
+  <input type="text" id="filter-owner" placeholder="filter...">
+</div>
+
+<div class="content">
+  <table>
+    <thead>
+      <tr>
+        <th data-col="id" style="width:50px">ID</th>
+        <th data-col="status" style="width:100px">Status</th>
+        <th data-col="priority" style="width:50px">Pri</th>
+        <th data-col="issue_type" style="width:70px">Type</th>
+        <th data-col="owner" style="width:100px">Owner</th>
+        <th data-col="title">Title</th>
+      </tr>
+    </thead>
+    <tbody id="issue-list"></tbody>
+  </table>
+  <div id="empty-state" class="empty-state" style="display:none;">
+    <p>No issues found.</p>
+  </div>
+</div>
+
+<div class="detail-panel" id="detail-panel">
+  <div class="detail-header">
+    <span class="issue-id" id="detail-id"></span>
+    <h2 id="detail-title"></h2>
+  </div>
+  <div class="detail-meta">
+    <span>Status: <strong id="detail-status"></strong></span>
+    <span>Priority: <strong id="detail-priority"></strong></span>
+    <span>Type: <strong id="detail-type"></strong></span>
+    <span>Owner: <strong id="detail-owner"></strong></span>
+    <span>Created: <strong id="detail-created"></strong></span>
+  </div>
+  <div class="detail-labels" id="detail-labels"></div>
+  <div class="detail-description" id="detail-description"></div>
+  <div class="comments-section">
+    <h3>Comments</h3>
+    <div id="detail-comments"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  "use strict";
+
+  var state = {
+    repos: [],
+    issues: [],
+    selectedRepo: "",
+    selectedIssueId: null,
+    sortCol: "id",
+    sortAsc: true,
+    refreshTimer: null
+  };
+
+  var repoSelect = document.getElementById("repo-select");
+  var filterStatus = document.getElementById("filter-status");
+  var filterType = document.getElementById("filter-type");
+  var filterOwner = document.getElementById("filter-owner");
+  var issueList = document.getElementById("issue-list");
+  var emptyState = document.getElementById("empty-state");
+  var detailPanel = document.getElementById("detail-panel");
+  var syncDot = document.getElementById("sync-dot");
+  var syncLabel = document.getElementById("sync-label");
+
+  function api(path) {
+    return fetch(path).then(function(r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  function loadRepos() {
+    return api("/repos").then(function(repos) {
+      state.repos = repos || [];
+      repoSelect.innerHTML = "";
+      if (state.repos.length === 0) {
+        repoSelect.innerHTML = '<option value="">No repos</option>';
+        return;
+      }
+      state.repos.forEach(function(repo) {
+        var name = repo.owner + "/" + repo.name;
+        var opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        repoSelect.appendChild(opt);
+      });
+      if (state.selectedRepo && repoSelect.querySelector('option[value="' + state.selectedRepo + '"]')) {
+        repoSelect.value = state.selectedRepo;
+      } else {
+        state.selectedRepo = repoSelect.value;
+      }
+    });
+  }
+
+  function loadHealth() {
+    return api("/health").then(function(data) {
+      var syncStatus = data.sync_status;
+      if (!syncStatus || !state.selectedRepo) {
+        syncDot.className = "sync-dot";
+        syncLabel.textContent = "ok";
+        return;
+      }
+      var repoSync = syncStatus[state.selectedRepo];
+      if (!repoSync) {
+        syncDot.className = "sync-dot";
+        syncLabel.textContent = "ok";
+        return;
+      }
+      if (repoSync.last_error) {
+        syncDot.className = "sync-dot error";
+        syncLabel.textContent = "error";
+        syncLabel.title = repoSync.last_error;
+      } else if (repoSync.syncing) {
+        syncDot.className = "sync-dot syncing";
+        syncLabel.textContent = "syncing";
+        syncLabel.title = "";
+      } else {
+        syncDot.className = "sync-dot";
+        syncLabel.textContent = repoSync.last_sync ? "synced" : "ok";
+        syncLabel.title = repoSync.last_sync || "";
+      }
+    }).catch(function() {
+      syncDot.className = "sync-dot error";
+      syncLabel.textContent = "unreachable";
+    });
+  }
+
+  function loadIssues() {
+    if (!state.selectedRepo) {
+      state.issues = [];
+      renderIssues();
+      return Promise.resolve();
+    }
+    var url = "/issues?repo=" + encodeURIComponent(state.selectedRepo);
+    var st = filterStatus.value;
+    if (st) url += "&status=" + encodeURIComponent(st);
+    var ty = filterType.value;
+    if (ty) url += "&type=" + encodeURIComponent(ty);
+    var ow = filterOwner.value.trim();
+    if (ow) url += "&owner=" + encodeURIComponent(ow);
+    return api(url).then(function(issues) {
+      state.issues = issues || [];
+      renderIssues();
+    }).catch(function() {
+      state.issues = [];
+      renderIssues();
+    });
+  }
+
+  function sortIssues(issues) {
+    var col = state.sortCol;
+    var asc = state.sortAsc;
+    return issues.slice().sort(function(a, b) {
+      var va = a[col], vb = b[col];
+      if (va == null) va = "";
+      if (vb == null) vb = "";
+      if (typeof va === "number" && typeof vb === "number") {
+        return asc ? va - vb : vb - va;
+      }
+      va = String(va).toLowerCase();
+      vb = String(vb).toLowerCase();
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      return 0;
+    });
+  }
+
+  function renderIssues() {
+    issueList.innerHTML = "";
+    var sorted = sortIssues(state.issues);
+    if (sorted.length === 0) {
+      emptyState.style.display = "block";
+      detailPanel.classList.remove("open");
+      return;
+    }
+    emptyState.style.display = "none";
+    sorted.forEach(function(iss) {
+      var tr = document.createElement("tr");
+      if (iss.id === state.selectedIssueId) tr.className = "selected";
+      tr.innerHTML =
+        '<td>' + esc(iss.id) + '</td>' +
+        '<td><span class="status-badge status-' + esc(iss.status) + '">' + esc(iss.status) + '</span></td>' +
+        '<td>' + esc(iss.priority) + '</td>' +
+        '<td><span class="type-badge">' + esc(iss.issue_type) + '</span></td>' +
+        '<td>' + esc(iss.owner || "\u2014") + '</td>' +
+        '<td class="title-col">' + esc(iss.title) + '</td>';
+      tr.addEventListener("click", function() { selectIssue(iss); });
+      issueList.appendChild(tr);
+    });
+  }
+
+  function selectIssue(iss) {
+    if (state.selectedIssueId === iss.id) {
+      state.selectedIssueId = null;
+      detailPanel.classList.remove("open");
+      renderIssues();
+      return;
+    }
+    state.selectedIssueId = iss.id;
+    renderIssues();
+
+    // Fetch full issue to get latest comments.
+    api("/issues/" + iss.id + "?repo=" + encodeURIComponent(state.selectedRepo)).then(function(full) {
+      renderDetail(full);
+    }).catch(function() {
+      renderDetail(iss);
+    });
+  }
+
+  function renderDetail(iss) {
+    document.getElementById("detail-id").textContent = "#" + iss.id;
+    document.getElementById("detail-title").textContent = iss.title;
+    document.getElementById("detail-status").textContent = iss.status;
+    document.getElementById("detail-priority").textContent = iss.priority;
+    document.getElementById("detail-type").textContent = iss.issue_type;
+    document.getElementById("detail-owner").textContent = iss.owner || "\u2014";
+    document.getElementById("detail-created").textContent = formatDate(iss.created_at);
+    document.getElementById("detail-description").textContent = iss.description || "(no description)";
+
+    var labelsEl = document.getElementById("detail-labels");
+    labelsEl.innerHTML = "";
+    if (iss.labels && iss.labels.length > 0) {
+      iss.labels.forEach(function(l) {
+        var span = document.createElement("span");
+        span.className = "label-tag";
+        span.textContent = l;
+        labelsEl.appendChild(span);
+      });
+    }
+
+    var commentsEl = document.getElementById("detail-comments");
+    commentsEl.innerHTML = "";
+    if (iss.comments && iss.comments.length > 0) {
+      iss.comments.forEach(function(c) {
+        var div = document.createElement("div");
+        div.className = "comment";
+        div.innerHTML =
+          '<div class="comment-meta">' + esc(c.timestamp || "") + (c.author ? " " + esc(c.author) : "") + '</div>' +
+          '<div class="comment-text">' + esc(c.text) + '</div>';
+        commentsEl.appendChild(div);
+      });
+    } else {
+      commentsEl.innerHTML = '<div style="color:var(--fg2);font-size:12px;">No comments.</div>';
+    }
+
+    detailPanel.classList.add("open");
+  }
+
+  function formatDate(s) {
+    if (!s) return "\u2014";
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  }
+
+  function esc(v) {
+    if (v == null) return "";
+    var s = String(v);
+    var el = document.createElement("span");
+    el.textContent = s;
+    return el.innerHTML;
+  }
+
+  // Sort column click handler.
+  document.querySelectorAll("thead th[data-col]").forEach(function(th) {
+    th.addEventListener("click", function() {
+      var col = th.getAttribute("data-col");
+      if (state.sortCol === col) {
+        state.sortAsc = !state.sortAsc;
+      } else {
+        state.sortCol = col;
+        state.sortAsc = true;
+      }
+      renderIssues();
+    });
+  });
+
+  repoSelect.addEventListener("change", function() {
+    state.selectedRepo = repoSelect.value;
+    state.selectedIssueId = null;
+    detailPanel.classList.remove("open");
+    loadIssues();
+    loadHealth();
+  });
+
+  filterStatus.addEventListener("change", function() { loadIssues(); });
+  filterType.addEventListener("change", function() { loadIssues(); });
+  var ownerTimer = null;
+  filterOwner.addEventListener("input", function() {
+    clearTimeout(ownerTimer);
+    ownerTimer = setTimeout(loadIssues, 300);
+  });
+
+  function refresh() {
+    loadIssues();
+    loadHealth();
+  }
+
+  // Initial load.
+  loadRepos().then(function() {
+    loadIssues();
+    loadHealth();
+  });
+
+  // Auto-refresh every 10 seconds.
+  state.refreshTimer = setInterval(refresh, 10000);
+})();
+</script>
+</body>
+</html>

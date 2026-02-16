@@ -13,12 +13,18 @@ import (
 	"github.com/jmaddaus/boxofrocks/internal/store"
 )
 
+const (
+	slowInterval  = 60 * time.Second
+	idleThreshold = 2 * time.Minute
+)
+
 // SyncStatus describes the current sync state of a single repo.
 type SyncStatus struct {
 	RepoName      string     `json:"repo_name"`
 	LastSyncAt    *time.Time `json:"last_sync_at"`
 	PendingEvents int        `json:"pending_events"`
 	Syncing       bool       `json:"syncing"`
+	Idle          bool       `json:"idle"`
 	LastError     string     `json:"last_error,omitempty"`
 }
 
@@ -177,32 +183,34 @@ type syncRequest struct {
 
 // RepoSyncer runs a sync loop for a single repository.
 type RepoSyncer struct {
-	repo         *model.RepoConfig
-	store        store.Store
-	ghClient     github.Client
-	manager      *SyncManager // back-reference for rate limit
-	interval     time.Duration
-	forceCh      chan syncRequest
-	stopCh       chan struct{}
-	doneCh       chan struct{} // closed when run() exits
-	status       SyncStatus
-	mu           sync.RWMutex
-	labelEnsured bool
+	repo           *model.RepoConfig
+	store          store.Store
+	ghClient       github.Client
+	manager        *SyncManager // back-reference for rate limit
+	fastInterval   time.Duration
+	lastActivityAt time.Time
+	forceCh        chan syncRequest
+	stopCh         chan struct{}
+	doneCh         chan struct{} // closed when run() exits
+	status         SyncStatus
+	mu             sync.RWMutex
+	labelEnsured   bool
 }
 
-func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr *SyncManager, interval time.Duration) *RepoSyncer {
+func newRepoSyncer(repo *model.RepoConfig, s store.Store, gh github.Client, mgr *SyncManager, fastInterval time.Duration) *RepoSyncer {
 	// Copy the repo config so the syncer owns its own copy and doesn't
 	// race with callers who hold the original pointer.
 	repoCopy := *repo
 	return &RepoSyncer{
-		repo:     &repoCopy,
-		store:    s,
-		ghClient: gh,
-		manager:  mgr,
-		interval: interval,
-		forceCh:  make(chan syncRequest, 1),
-		stopCh:   make(chan struct{}),
-		doneCh:   make(chan struct{}),
+		repo:           &repoCopy,
+		store:          s,
+		ghClient:       gh,
+		manager:        mgr,
+		fastInterval:   fastInterval,
+		lastActivityAt: time.Now(),
+		forceCh:        make(chan syncRequest, 1),
+		stopCh:         make(chan struct{}),
+		doneCh:         make(chan struct{}),
 		status: SyncStatus{
 			RepoName:   repoCopy.FullName(),
 			LastSyncAt: repoCopy.LastSyncAt,
@@ -221,7 +229,8 @@ func (rs *RepoSyncer) run(startDelay time.Duration) {
 		}
 	}
 
-	ticker := time.NewTicker(rs.interval)
+	currentInterval := rs.currentInterval()
+	ticker := time.NewTicker(currentInterval)
 	defer ticker.Stop()
 
 	// Do an initial sync immediately.
@@ -232,9 +241,17 @@ func (rs *RepoSyncer) run(startDelay time.Duration) {
 		case <-ticker.C:
 			rs.cycle(false)
 		case req := <-rs.forceCh:
+			rs.setLastActivity() // force sync = activity
 			rs.cycle(req.full)
 		case <-rs.stopCh:
 			return
+		}
+
+		// Check if tier changed, reset ticker if so.
+		newInterval := rs.currentInterval()
+		if newInterval != currentInterval {
+			ticker.Reset(newInterval)
+			currentInterval = newInterval
 		}
 	}
 }
@@ -261,13 +278,30 @@ func (rs *RepoSyncer) force(full bool) {
 func (rs *RepoSyncer) getStatus() SyncStatus {
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
-	return rs.status
+	st := rs.status
+	st.Idle = time.Since(rs.lastActivityAt) >= idleThreshold
+	return st
 }
 
 func (rs *RepoSyncer) setStatus(fn func(s *SyncStatus)) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	fn(&rs.status)
+}
+
+func (rs *RepoSyncer) setLastActivity() {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	rs.lastActivityAt = time.Now()
+}
+
+func (rs *RepoSyncer) currentInterval() time.Duration {
+	rs.mu.RLock()
+	defer rs.mu.RUnlock()
+	if time.Since(rs.lastActivityAt) < idleThreshold {
+		return rs.fastInterval
+	}
+	return slowInterval
 }
 
 func (rs *RepoSyncer) cycle(full bool) {
@@ -288,7 +322,8 @@ func (rs *RepoSyncer) cycle(full bool) {
 	}
 
 	// Push outbound events first.
-	if err := rs.pushOutbound(ctx); err != nil {
+	pushed, err := rs.pushOutbound(ctx)
+	if err != nil {
 		rs.setStatus(func(s *SyncStatus) {
 			s.Syncing = false
 			s.LastError = fmt.Sprintf("push: %v", err)
@@ -297,11 +332,15 @@ func (rs *RepoSyncer) cycle(full bool) {
 	}
 
 	// Pull inbound events.
-	var err error
+	var pulled bool
 	if full {
-		err = rs.pullInboundFull(ctx)
+		pulled, err = rs.pullInboundFull(ctx)
 	} else {
-		err = rs.pullInbound(ctx)
+		pulled, err = rs.pullInbound(ctx)
+	}
+
+	if pushed || pulled {
+		rs.setLastActivity()
 	}
 
 	now := time.Now().UTC()
@@ -328,10 +367,15 @@ func (rs *RepoSyncer) cycle(full bool) {
 }
 
 // pushOutbound sends locally-created events to GitHub.
-func (rs *RepoSyncer) pushOutbound(ctx context.Context) error {
+// Returns true if any events were pushed.
+func (rs *RepoSyncer) pushOutbound(ctx context.Context) (bool, error) {
 	pending, err := rs.store.PendingEvents(ctx, rs.repo.ID)
 	if err != nil {
-		return fmt.Errorf("query pending events: %w", err)
+		return false, fmt.Errorf("query pending events: %w", err)
+	}
+
+	if len(pending) == 0 {
+		return false, nil
 	}
 
 	for _, ev := range pending {
@@ -339,7 +383,7 @@ func (rs *RepoSyncer) pushOutbound(ctx context.Context) error {
 
 		issue, err := rs.store.GetIssue(ctx, ev.IssueID)
 		if err != nil {
-			return fmt.Errorf("get issue %d: %w", ev.IssueID, err)
+			return false, fmt.Errorf("get issue %d: %w", ev.IssueID, err)
 		}
 
 		if ev.Action == model.ActionCreate && issue.GitHubID == nil {
@@ -353,13 +397,13 @@ func (rs *RepoSyncer) pushOutbound(ctx context.Context) error {
 				append([]string{"boxofrocks"}, issue.Labels...),
 			)
 			if err != nil {
-				return fmt.Errorf("create github issue: %w", err)
+				return false, fmt.Errorf("create github issue: %w", err)
 			}
 
 			// Store the GitHub issue number on the local issue.
 			issue.GitHubID = &ghIssue.Number
 			if err := rs.store.UpdateIssue(ctx, issue); err != nil {
-				return fmt.Errorf("update issue github_id: %w", err)
+				return false, fmt.Errorf("update issue github_id: %w", err)
 			}
 
 			// Post the create event as the first comment.
@@ -367,11 +411,11 @@ func (rs *RepoSyncer) pushOutbound(ctx context.Context) error {
 			commentBody := github.FormatEventComment(ev)
 			ghComment, err := rs.ghClient.CreateComment(ctx, rs.repo.Owner, rs.repo.Name, ghIssue.Number, commentBody)
 			if err != nil {
-				return fmt.Errorf("create initial comment: %w", err)
+				return false, fmt.Errorf("create initial comment: %w", err)
 			}
 
 			if err := rs.store.MarkEventSynced(ctx, ev.ID, ghComment.ID); err != nil {
-				return fmt.Errorf("mark event synced: %w", err)
+				return false, fmt.Errorf("mark event synced: %w", err)
 			}
 		} else {
 			// Post event as a comment on the existing GitHub issue.
@@ -384,20 +428,21 @@ func (rs *RepoSyncer) pushOutbound(ctx context.Context) error {
 			commentBody := github.FormatEventComment(ev)
 			ghComment, err := rs.ghClient.CreateComment(ctx, rs.repo.Owner, rs.repo.Name, *issue.GitHubID, commentBody)
 			if err != nil {
-				return fmt.Errorf("create comment for event %d: %w", ev.ID, err)
+				return false, fmt.Errorf("create comment for event %d: %w", ev.ID, err)
 			}
 
 			if err := rs.store.MarkEventSynced(ctx, ev.ID, ghComment.ID); err != nil {
-				return fmt.Errorf("mark event synced: %w", err)
+				return false, fmt.Errorf("mark event synced: %w", err)
 			}
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // pullInbound fetches new comments from GitHub and applies them incrementally.
-func (rs *RepoSyncer) pullInbound(ctx context.Context) error {
+// Returns true if issues were returned (i.e. not a 304 Not Modified).
+func (rs *RepoSyncer) pullInbound(ctx context.Context) (bool, error) {
 	rs.manager.checkRateLimit()
 
 	// List GitHub issues with boxofrocks label.
@@ -407,7 +452,7 @@ func (rs *RepoSyncer) pullInbound(ctx context.Context) error {
 		Labels: "boxofrocks",
 	})
 	if err != nil {
-		return fmt.Errorf("list issues: %w", err)
+		return false, fmt.Errorf("list issues: %w", err)
 	}
 
 	// Update the ETag.
@@ -415,12 +460,12 @@ func (rs *RepoSyncer) pullInbound(ctx context.Context) error {
 
 	// If no new issues (304 Not Modified), issues will be nil.
 	if issues == nil {
-		return nil
+		return false, nil
 	}
 
 	for _, ghIssue := range issues {
 		if err := rs.processGitHubIssue(ctx, ghIssue, false); err != nil {
-			return fmt.Errorf("process issue #%d: %w", ghIssue.Number, err)
+			return false, fmt.Errorf("process issue #%d: %w", ghIssue.Number, err)
 		}
 	}
 
@@ -435,33 +480,34 @@ func (rs *RepoSyncer) pullInbound(ctx context.Context) error {
 		rs.repo.IssuesSince = maxUpdated.UTC().Format(time.RFC3339)
 	}
 
-	return nil
+	return true, nil
 }
 
 // pullInboundFull fetches all comments and uses full replay.
-func (rs *RepoSyncer) pullInboundFull(ctx context.Context) error {
+// Returns true if issues were returned (i.e. not a 304 Not Modified).
+func (rs *RepoSyncer) pullInboundFull(ctx context.Context) (bool, error) {
 	rs.manager.checkRateLimit()
 
 	issues, newETag, err := rs.ghClient.ListIssues(ctx, rs.repo.Owner, rs.repo.Name, github.ListOpts{
 		Labels: "boxofrocks",
 	})
 	if err != nil {
-		return fmt.Errorf("list issues (full): %w", err)
+		return false, fmt.Errorf("list issues (full): %w", err)
 	}
 
 	rs.repo.IssuesETag = newETag
 
 	if issues == nil {
-		return nil
+		return false, nil
 	}
 
 	for _, ghIssue := range issues {
 		if err := rs.processGitHubIssue(ctx, ghIssue, true); err != nil {
-			return fmt.Errorf("process issue #%d (full): %w", ghIssue.Number, err)
+			return false, fmt.Errorf("process issue #%d (full): %w", ghIssue.Number, err)
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // processGitHubIssue handles a single GitHub issue, syncing comments locally.

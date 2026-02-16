@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jmaddaus/boxofrocks/internal/model"
 )
@@ -36,24 +37,47 @@ func Apply(issue *model.Issue, event *model.Event) (*model.Issue, error) {
 		}
 	}
 
+	var result *model.Issue
+	var err error
+
 	switch event.Action {
 	case model.ActionCreate:
-		return applyCreate(event, &payload)
+		result, err = applyCreate(event, &payload)
 	case model.ActionStatusChange:
-		return applyStatusChange(issue, event, &payload)
+		result, err = applyStatusChange(issue, event, &payload)
 	case model.ActionAssign:
-		return applyAssign(issue, event, &payload)
+		result, err = applyAssign(issue, event, &payload)
 	case model.ActionClose:
-		return applyClose(issue, event)
+		result, err = applyClose(issue, event)
 	case model.ActionUpdate:
-		return applyUpdate(issue, event, &payload)
+		result, err = applyUpdate(issue, event, &payload)
 	case model.ActionDelete:
-		return applyDelete(issue, event)
+		result, err = applyDelete(issue, event)
 	case model.ActionReopen:
-		return applyReopen(issue, event)
+		result, err = applyReopen(issue, event)
+	case model.ActionComment:
+		result, err = applyComment(issue, event)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", event.Action)
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Any event can carry a comment via the payload Comment field.
+	if payload.Comment != "" && result != nil {
+		if result.Comments == nil {
+			result.Comments = []model.Comment{}
+		}
+		result.Comments = append(result.Comments, model.Comment{
+			Text:      payload.Comment,
+			Author:    event.Agent,
+			Timestamp: event.Timestamp.UTC().Format(time.RFC3339),
+		})
+	}
+
+	return result, nil
 }
 
 func applyCreate(event *model.Event, payload *model.EventPayload) (*model.Issue, error) {
@@ -65,6 +89,7 @@ func applyCreate(event *model.Event, payload *model.EventPayload) (*model.Issue,
 		Status:      model.StatusOpen,
 		Labels:      payload.Labels,
 		Owner:       payload.Owner,
+		Comments:    []model.Comment{},
 		CreatedAt:   event.Timestamp,
 		UpdatedAt:   event.Timestamp,
 	}
@@ -166,6 +191,14 @@ func applyReopen(issue *model.Issue, event *model.Event) (*model.Issue, error) {
 	}
 	issue.Status = model.StatusOpen
 	issue.ClosedAt = nil
+	issue.UpdatedAt = event.Timestamp
+	return issue, nil
+}
+
+func applyComment(issue *model.Issue, event *model.Event) (*model.Issue, error) {
+	if issue == nil {
+		return nil, fmt.Errorf("comment on non-existent issue %d", event.IssueID)
+	}
 	issue.UpdatedAt = event.Timestamp
 	return issue, nil
 }

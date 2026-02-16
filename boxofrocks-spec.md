@@ -50,7 +50,7 @@ Single long-running process per machine. Listens on `127.0.0.1:<PORT>`.
 
 - Embedded SQLite database at `~/.boxofrocks/bor.db`
 - REST API for all operations
-- Background sync goroutine polls GitHub Issues every 5 seconds
+- Background sync goroutine polls GitHub Issues with adaptive intervals (5s when active, 60s when idle)
 - Uses ETags to minimize API usage (~720 reads/hour worst case)
 - Caches locally, writes propagate to GitHub in background
 
@@ -74,7 +74,7 @@ All output is JSON by default (agent-friendly). Add `--pretty` for human-readabl
 GitHub Issues is the remote store. Issue comments are the event log. Issue body is the computed snapshot.
 
 - Agent actions append JSON events as GitHub Issue comments
-- Daemon polls comments every 5 seconds, replays log to derive state
+- Daemon polls comments with adaptive intervals (5s active / 60s idle), replays log to derive state
 - ETags prevent unnecessary API calls (~720 reads/hour worst case)
 - Local writes update cache immediately (other agents see changes instantly)
 - GitHub Action arbiter triggers on new comments, writes authoritative state to issue body
@@ -276,7 +276,7 @@ jobs:
 - **Events are never generated from reconciliation** — only from explicit actions
 - **Arbiter is the single writer** to the issue body — no contention
 - **Agents self-reconcile** from the same event log — two agents replaying the same log always derive the same state
-- **Stale reads are harmless** — worst case an agent acts on 5-second-old info, which self-corrects on next sync
+- **Stale reads are harmless** — worst case an agent acts on slightly stale info (5s when active, 60s when idle), which self-corrects on next sync
 - **No ping-pong** — agents propose, arbiter decides. No correction loops.
 
 ### Resource Usage

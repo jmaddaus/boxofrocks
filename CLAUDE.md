@@ -86,6 +86,12 @@ Each `RepoSyncer` poll cycle:
 2. **Pull inbound:** list GitHub issues with `boxofrocks` label, fetch new comments since `last_comment_id`, apply incrementally
 3. **Web-created issues:** GitHub issues with `boxofrocks` label but no local match get a synthetic `create` event
 
+**Adaptive polling:** Each syncer tracks a `lastActivityAt` timestamp. If a cycle pushes outbound events or receives inbound changes, `lastActivityAt` is reset. Polling uses two tiers:
+- **Fast** (5s base, scaled by repo count): used when `lastActivityAt` is within 2 minutes
+- **Slow** (60s): used when idle longer than 2 minutes
+
+Force sync always resets to fast tier. The `SyncStatus.Idle` field reports whether a repo is in slow mode.
+
 ### Interfaces for Testability
 
 - `store.Store` — mocked with in-memory SQLite (`:memory:`) in tests

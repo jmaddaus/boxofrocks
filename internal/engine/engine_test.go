@@ -813,6 +813,98 @@ func TestApply_DeletedTerminal_StatusChangeSkipped(t *testing.T) {
 	}
 }
 
+// --- Comment tests ---
+
+func TestReplay_Comments(t *testing.T) {
+	runFixture(t, "comments.json")
+}
+
+func TestApply_StandaloneComment(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	issue, err := Apply(nil, &model.Event{
+		ID: 1, RepoID: 1, IssueID: 1, Timestamp: ts,
+		Action:  model.ActionCreate,
+		Payload: `{"title":"Comment test"}`,
+		Agent:   "alice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issue.Comments) != 0 {
+		t.Fatalf("expected 0 comments after create, got %d", len(issue.Comments))
+	}
+
+	// Add a standalone comment.
+	issue, err = Apply(issue, &model.Event{
+		ID: 2, RepoID: 1, IssueID: 1, Timestamp: ts.Add(time.Hour),
+		Action:  model.ActionComment,
+		Payload: `{"comment":"Started working on this"}`,
+		Agent:   "alice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issue.Comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(issue.Comments))
+	}
+	if issue.Comments[0].Text != "Started working on this" {
+		t.Errorf("comment text = %q, want %q", issue.Comments[0].Text, "Started working on this")
+	}
+	if issue.Comments[0].Author != "alice" {
+		t.Errorf("comment author = %q, want %q", issue.Comments[0].Author, "alice")
+	}
+}
+
+func TestApply_UpdateWithComment(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	issue, err := Apply(nil, &model.Event{
+		ID: 1, RepoID: 1, IssueID: 1, Timestamp: ts,
+		Action:  model.ActionCreate,
+		Payload: `{"title":"Original"}`,
+		Agent:   "alice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Update with a comment attached.
+	issue, err = Apply(issue, &model.Event{
+		ID: 2, RepoID: 1, IssueID: 1, Timestamp: ts.Add(time.Hour),
+		Action:  model.ActionUpdate,
+		Payload: `{"title":"Updated","comment":"Changed the title"}`,
+		Agent:   "bob",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Title != "Updated" {
+		t.Errorf("title = %q, want %q", issue.Title, "Updated")
+	}
+	if len(issue.Comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(issue.Comments))
+	}
+	if issue.Comments[0].Text != "Changed the title" {
+		t.Errorf("comment text = %q, want %q", issue.Comments[0].Text, "Changed the title")
+	}
+	if issue.Comments[0].Author != "bob" {
+		t.Errorf("comment author = %q, want %q", issue.Comments[0].Author, "bob")
+	}
+}
+
+func TestApply_CommentOnNilIssueErrors(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err := Apply(nil, &model.Event{
+		ID: 1, RepoID: 1, IssueID: 99, Timestamp: ts,
+		Action:  model.ActionComment,
+		Payload: `{"comment":"test"}`,
+	})
+	if err == nil {
+		t.Error("expected error for comment on nil issue, got nil")
+	}
+}
+
 // --- Legacy fixture test ---
 
 func TestReplay_LegacyNoFromStatus(t *testing.T) {

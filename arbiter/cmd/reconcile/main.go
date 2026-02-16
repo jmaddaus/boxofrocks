@@ -57,8 +57,31 @@ func main() {
 		log.Fatalf("update issue body: %v", err)
 	}
 
+	// Close or reopen the GitHub issue to match replayed state.
+	ghIssue, err := client.GetIssue(ctx, owner, repo, issueNum)
+	if err != nil {
+		log.Fatalf("get issue for state sync: %v", err)
+	}
+	if err := syncIssueState(ctx, client, owner, repo, issueNum, replayed, ghIssue); err != nil {
+		log.Fatalf("sync issue state: %v", err)
+	}
+
 	fmt.Printf("reconciled issue #%d: status=%s, priority=%d, owner=%s\n",
 		issueNum, replayed.Status, replayed.Priority, replayed.Owner)
+}
+
+// syncIssueState closes or reopens the GitHub issue to match the replayed state.
+func syncIssueState(ctx context.Context, client github.Client, owner, repo string, issueNum int, replayed *model.Issue, ghIssue *github.GitHubIssue) error {
+	if replayed.Status == model.StatusClosed || replayed.Status == model.StatusDeleted {
+		if ghIssue.State == "open" {
+			return client.UpdateIssueState(ctx, owner, repo, issueNum, "closed")
+		}
+	} else {
+		if ghIssue.State == "closed" {
+			return client.UpdateIssueState(ctx, owner, repo, issueNum, "open")
+		}
+	}
+	return nil
 }
 
 // reconcile fetches comments for the given issue, replays boxofrocks events,

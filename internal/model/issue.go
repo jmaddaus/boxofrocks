@@ -22,6 +22,13 @@ const (
 	IssueTypeEpic    IssueType = "epic"
 )
 
+// Comment represents a narrative comment attached to an issue.
+type Comment struct {
+	Text      string `json:"text"`
+	Author    string `json:"author,omitempty"`
+	Timestamp string `json:"timestamp"`
+}
+
 type Issue struct {
 	ID          int        `json:"id"`
 	RepoID      int        `json:"repo_id"`
@@ -36,4 +43,5 @@ type Issue struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	ClosedAt    *time.Time `json:"closed_at,omitempty"`
+	Comments    []Comment  `json:"comments"`
 }

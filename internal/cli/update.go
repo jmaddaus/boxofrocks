@@ -12,6 +12,7 @@ func runUpdate(args []string, gf globalFlags) error {
 	priority := fs.Int("priority", -1, "New priority")
 	title := fs.String("title", "", "New title")
 	description := fs.String("description", "", "New description")
+	comment := fs.String("comment", "", "Add a comment")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -19,7 +20,7 @@ func runUpdate(args []string, gf globalFlags) error {
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
-		return fmt.Errorf("usage: bor update <id> [--status S] [--priority N] [--title T] [--description D]")
+		return fmt.Errorf("usage: bor update <id> [--status S] [--priority N] [--title T] [--description D] [--comment C]")
 	}
 
 	id, err := strconv.Atoi(remaining[0])
@@ -40,9 +41,12 @@ func runUpdate(args []string, gf globalFlags) error {
 	if *description != "" {
 		fields["description"] = *description
 	}
+	if *comment != "" {
+		fields["comment"] = *comment
+	}
 
 	if len(fields) == 0 {
-		return fmt.Errorf("no fields to update; use --status, --priority, --title, or --description")
+		return fmt.Errorf("no fields to update; use --status, --priority, --title, --description, or --comment")
 	}
 
 	client := newClient(gf)
