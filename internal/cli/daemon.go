@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
@@ -288,13 +287,3 @@ func readTailLines(path string, n int) (string, error) {
 	return string(out), nil
 }
 
-// isDaemonRunning checks if the daemon health endpoint responds.
-func isDaemonRunning(host string) bool {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(host + "/health")
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
-}

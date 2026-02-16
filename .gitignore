@@ -1,6 +1,7 @@
 # Compiled binaries
 /bin/
 /bor
+/reconcile
 
 # OS files
 .DS_Store
