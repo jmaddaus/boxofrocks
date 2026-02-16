@@ -1,8 +1,54 @@
 <!-- @format -->
 
 # Box of Rocks (`bor`)
+Inspired by having too many issues with async control, json and daemon-spawn running various agents in VMs/sandboxes and worktrees using beads.
 
-A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background. Daemon uses http to coordinate between any number of local agents/humans across multiple repos. Supports unix socket and file-based queue in repo to communicate with default docker sandbox images and other VMs. Launch simple web UI at localhost:8042.
+A single machine daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background. Daemon uses http to coordinate between any number of local agents/humans across multiple repos. Supports unix socket and file-based queue in repo to communicate with default docker sandbox images and other VMs. Launch simple web UI at localhost:8042.
+
+## Grug First Start
+
+### On Computer
+Mac
+```bash
+brew install jmaddaus/tap/bor
+```
+Linux
+```bash
+curl -fsSL https://raw.githubusercontent.com/jmaddaus/boxofrocks/main/install.sh | sh\
+```
+Win
+```powershell
+scoop bucket add bor https://github.com/jmaddaus/scoop-bucket
+scoop install bor
+```
+
+### In Repo Directory (also each worktree path being used)
+bor init (—json for full sandbox, —socket if you need it)
+* creates .github/workflows/arbiter.yml
+* starts daemon (if not running)
+* creates .boxofrocks/ if using socket or queue
+* creates .boxofrocks/bor_api.sh reference if using json method for agent reference.
+* updates .gitignore with .boxofrocks/
+
+### On GitHub
+* enable Issues if disabled
+* push arbiter and updated gitignore to your repo, pull into main
+		
+### In Agent File (e.g. agents.md, claude.md)
+* copy/paste md instructions for your agents into file from docs/agent-instructions (native = agent runs on machine so uses CLI, json = full sandbox agent so uses json queue, socket = linux shared kernel VM option)
+* edit {{AGENT_NAME}} in stub with your agent name/id to use
+
+### Success!
+* arbiter.yml will pull binary/checksum to run GH Actions to adjudicate conflicts between updates in issues
+* issues created by (approved) humans in GH will be pulled down and tagged/updated by next agent to sync issue into tracker 
+
+### (Optional) In Web Browser
+Visit localhost:8042 for basic UI to see local issues info
+
+### (Optional) In Term
+```
+bor help
+```
 
 ## Quick Start
 
