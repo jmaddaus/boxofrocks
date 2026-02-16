@@ -271,6 +271,9 @@ func (d *Daemon) addRepo(w http.ResponseWriter, r *http.Request) {
 			if err := d.CreateSocketForRepo(repo); err != nil {
 				slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
 			}
+			if err := d.startFileQueue(repo); err != nil {
+				slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
+			}
 		}
 	}
 
@@ -892,15 +895,20 @@ func (d *Daemon) updateRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Toggle socket on/off as needed.
+	// Toggle socket and file queue on/off as needed.
 	if repo.SocketEnabled && repo.LocalPath != "" && !oldSocketEnabled {
 		if err := d.CreateSocketForRepo(repo); err != nil {
 			slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+		}
+		if err := d.startFileQueue(repo); err != nil {
+			slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
 		}
 	} else if !repo.SocketEnabled && oldSocketEnabled && repo.LocalPath != "" {
 		// Compute the socket path manually since SocketEnabled is now false.
 		sockPath := filepath.Join(repo.LocalPath, ".boxofrocks", "bor.sock")
 		d.removeSocket(sockPath)
+		queueDir := filepath.Join(repo.LocalPath, ".boxofrocks", "queue")
+		d.stopFileQueue(queueDir)
 	}
 
 	// Re-fetch to return canonical state.

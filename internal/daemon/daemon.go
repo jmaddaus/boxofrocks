@@ -41,6 +41,10 @@ type Daemon struct {
 	socketMu    stdsync.Mutex
 	socketLns   map[string]net.Listener // sockPath → listener
 	socketRepos map[string]int          // sockPath → repoID
+
+	queueMu    stdsync.Mutex
+	queueStops map[string]chan struct{} // queueDir → stop channel
+	queueRepos map[string]int          // queueDir → repoID
 }
 
 // New creates a new Daemon, opening the SQLite store and setting up the HTTP server.
@@ -59,6 +63,8 @@ func New(cfg *config.Config) (*Daemon, error) {
 		store:       s,
 		socketLns:   make(map[string]net.Listener),
 		socketRepos: make(map[string]int),
+		queueStops:  make(map[string]chan struct{}),
+		queueRepos:  make(map[string]int),
 	}
 
 	mux := d.registerRoutes()
@@ -90,6 +96,8 @@ func NewWithStoreAndSync(cfg *config.Config, s store.Store, sm *sync.SyncManager
 		syncMgr:     sm,
 		socketLns:   make(map[string]net.Listener),
 		socketRepos: make(map[string]int),
+		queueStops:  make(map[string]chan struct{}),
+		queueRepos:  make(map[string]int),
 	}
 	if len(gh) > 0 {
 		d.ghClient = gh[0]
@@ -285,6 +293,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.startRepoSockets()
 	defer d.cleanupSockets()
 
+	// Start file-based queues for sandbox agent communication.
+	d.startFileQueues()
+	defer d.cleanupFileQueues()
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -327,6 +339,9 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 
 	// Remove socket files from disk (listeners already closed by server.Shutdown).
 	d.cleanupSockets()
+
+	// Stop file queue goroutines.
+	d.cleanupFileQueues()
 
 	if err := d.store.Close(); err != nil {
 		if firstErr == nil {

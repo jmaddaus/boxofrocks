@@ -32,3 +32,12 @@ func (r *RepoConfig) SocketPath() string {
 	}
 	return filepath.Join(r.LocalPath, ".boxofrocks", "bor.sock")
 }
+
+// QueueDir returns the path to the file-based queue directory for this repo,
+// or "" if socket is not enabled or local path is not set.
+func (r *RepoConfig) QueueDir() string {
+	if !r.SocketEnabled || r.LocalPath == "" {
+		return ""
+	}
+	return filepath.Join(r.LocalPath, ".boxofrocks", "queue")
+}
