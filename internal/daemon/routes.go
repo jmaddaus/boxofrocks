@@ -25,5 +25,8 @@ func (d *Daemon) registerRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /issues/{id}/assign", d.assignIssue)
 	mux.HandleFunc("POST /issues/{id}/comment", d.commentIssue)
 
+	// Web UI (served at root; more-specific API routes take precedence).
+	mux.HandleFunc("GET /", d.serveUI)
+
 	return mux
 }

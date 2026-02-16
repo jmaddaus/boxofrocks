@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -855,6 +856,25 @@ func TestUpdateIssueCommentOnly(t *testing.T) {
 	}
 	if updated.Comments[0].Text != "Just a note" {
 		t.Errorf("expected comment text 'Just a note', got %q", updated.Comments[0].Text)
+	}
+}
+
+func TestServeUI(t *testing.T) {
+	d := testDaemon(t)
+
+	rr := doRequest(t, d, "GET", "/", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "text/html; charset=utf-8" {
+		t.Errorf("expected Content-Type text/html; charset=utf-8, got %q", ct)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "<title>Box of Rocks</title>") {
+		t.Error("expected response to contain <title>Box of Rocks</title>")
 	}
 }
 
