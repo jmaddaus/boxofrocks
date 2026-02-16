@@ -40,30 +40,27 @@ bor_api() {
 Before starting work, check for a queued issue:
 
 ```bash
-# Get next unassigned issue
 bor_api GET /issues/next
-
-# Claim it (replace <id> and {{AGENT_NAME}})
 bor_api POST /issues/<id>/assign '{"owner":"{{AGENT_NAME}}"}'
+bor_api PATCH /issues/<id> '{"status":"in_progress","comment":"starting: brief plan"}'
 
-# Signal start
-bor_api PATCH /issues/<id> '{"status":"in_progress"}'
+# At milestones — comment on progress
+bor_api POST /issues/<id>/comment '{"comment":"implemented X, moving to Y"}'
 
-# ... do the work ...
+# If blocked
+bor_api PATCH /issues/<id> '{"status":"blocked","comment":"reason"}'
 
-# At milestones
-bor_api POST /issues/<id>/comment '{"comment":"description of progress"}'
+# When ready for review
+bor_api PATCH /issues/<id> '{"status":"in_review","comment":"summary of changes"}'
 
 # When done
-bor_api PATCH /issues/<id> '{"status":"closed"}'
+bor_api PATCH /issues/<id> '{"status":"closed","comment":"what was done"}'
 ```
 
-If `bor_api` returns a timeout error, the daemon may not be running on the host. If the next-issue response is a 404, proceed with the user's direct request. Do not create issues unless the user explicitly asks.
+If `bor_api` returns a timeout, the daemon may not be running. If next-issue returns 404, proceed with the user's direct request. Do not create issues unless explicitly asked.
 
-Other useful commands:
-- List issues: `bor_api GET /issues`
+Reference:
 - List by status: `bor_api GET '/issues?status=open'`
 - Create issue: `bor_api POST /issues '{"title":"..."}'`
-- Update status: `bor_api PATCH /issues/<id> '{"status":"S","comment":"text"}'`
 
-All responses are JSON with `{"status":<http_code>,"body":<response>}` envelope. Statuses: `open`, `in_progress`, `blocked`, `in_review`, `closed`. Types: `task`, `bug`, `feature`, `epic`. Priority: integer, lower = higher.
+Responses: `{"status":<http_code>,"body":<response>}`. Statuses: `open` `in_progress` `blocked` `in_review` `closed`. Types: `task` `bug` `feature` `epic`. Priority: integer, lower = higher.
