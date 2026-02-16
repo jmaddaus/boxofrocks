@@ -4,6 +4,9 @@
     issue_comment:                                                
       types: [created]
 
+  permissions:
+    issues: write
+
   jobs:
     reconcile:
       if: contains(github.event.comment.body, 'boxofrocks')
