@@ -175,6 +175,62 @@ func TestUpdateRepoIssuesSince(t *testing.T) {
 	}
 }
 
+func TestUpdateRepoSocketFields(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	repo := addTestRepo(t, s, "octocat", "hello-world")
+
+	// Initially empty/false.
+	if repo.LocalPath != "" {
+		t.Errorf("expected empty LocalPath, got %q", repo.LocalPath)
+	}
+	if repo.SocketEnabled {
+		t.Error("expected SocketEnabled=false initially")
+	}
+
+	// Set local_path and socket_enabled.
+	repo.LocalPath = "/tmp/my-repo"
+	repo.SocketEnabled = true
+	if err := s.UpdateRepo(ctx, repo); err != nil {
+		t.Fatalf("UpdateRepo: %v", err)
+	}
+
+	// Read back.
+	got, err := s.GetRepo(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepo: %v", err)
+	}
+	if got.LocalPath != "/tmp/my-repo" {
+		t.Errorf("LocalPath: want /tmp/my-repo, got %s", got.LocalPath)
+	}
+	if !got.SocketEnabled {
+		t.Error("expected SocketEnabled=true")
+	}
+
+	// Verify SocketPath() returns the expected value.
+	expected := "/tmp/my-repo/.boxofrocks/bor.sock"
+	if got.SocketPath() != expected {
+		t.Errorf("SocketPath: want %s, got %s", expected, got.SocketPath())
+	}
+
+	// Disable socket.
+	got.SocketEnabled = false
+	if err := s.UpdateRepo(ctx, got); err != nil {
+		t.Fatalf("UpdateRepo (disable): %v", err)
+	}
+
+	got2, err := s.GetRepo(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("GetRepo after disable: %v", err)
+	}
+	if got2.SocketEnabled {
+		t.Error("expected SocketEnabled=false after disable")
+	}
+	if got2.SocketPath() != "" {
+		t.Errorf("SocketPath should be empty when disabled, got %s", got2.SocketPath())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Issue tests
 // ---------------------------------------------------------------------------

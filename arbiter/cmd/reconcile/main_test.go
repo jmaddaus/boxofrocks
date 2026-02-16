@@ -57,6 +57,10 @@ func (m *mockClient) UpdateIssueState(ctx context.Context, owner, repo string, n
 	return nil
 }
 
+func (m *mockClient) GetRepo(ctx context.Context, owner, repo string) (*github.GitHubRepo, error) {
+	return &github.GitHubRepo{Private: true}, nil
+}
+
 func (m *mockClient) GetRateLimit() github.RateLimit {
 	return github.RateLimit{Remaining: 5000, Reset: time.Now().Add(time.Hour)}
 }
@@ -109,7 +113,7 @@ func TestReconcileCreatesMetadata(t *testing.T) {
 		},
 	}
 
-	body, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1)
+	body, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1, false)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -143,7 +147,7 @@ func TestReconcileFullLifecycle(t *testing.T) {
 		},
 	}
 
-	body, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1)
+	body, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1, false)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -169,7 +173,7 @@ func TestReconcileNoEvents(t *testing.T) {
 		issue: &github.GitHubIssue{Number: 1, Title: "Test", Body: ""},
 	}
 
-	_, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1)
+	_, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1, false)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -194,7 +198,7 @@ func TestReconcilePreservesHumanText(t *testing.T) {
 		},
 	}
 
-	body, _, err := reconcile(context.Background(), mc, "owner", "repo", 1)
+	body, _, err := reconcile(context.Background(), mc, "owner", "repo", 1, false)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -222,7 +226,7 @@ func TestReconcileInvalidTransitionsIgnored(t *testing.T) {
 		},
 	}
 
-	_, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1)
+	_, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1, false)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -259,7 +263,7 @@ func TestReconcileMultipleEvents(t *testing.T) {
 		},
 	}
 
-	body, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1)
+	body, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1, false)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -347,5 +351,49 @@ func TestSyncIssueState_NoChangeWhenClosedMatching(t *testing.T) {
 	}
 	if mc.updatedState != "" {
 		t.Errorf("expected no state update, got %q", mc.updatedState)
+	}
+}
+
+func TestReconcileFilterUntrustedAuthors(t *testing.T) {
+	t0 := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(1 * time.Hour)
+	t2 := t0.Add(2 * time.Hour)
+
+	// Create event from trusted author.
+	createComment := makeComment(1, model.ActionCreate, makeCreatePayload("Filtered", "desc"), t0)
+	createComment.AuthorAssociation = "OWNER"
+
+	// Status change from untrusted author — should be filtered.
+	untrustedComment := makeComment(2, model.ActionStatusChange, makeStatusPayload(model.StatusClosed), t1)
+	untrustedComment.AuthorAssociation = "NONE"
+
+	// Assign from trusted author — should be applied.
+	trustedComment := makeComment(3, model.ActionAssign, makeAssignPayload("bob"), t2)
+	trustedComment.AuthorAssociation = "COLLABORATOR"
+
+	mc := &mockClient{
+		comments: []*github.GitHubComment{createComment, untrustedComment, trustedComment},
+		issue: &github.GitHubIssue{
+			Number: 1,
+			Title:  "Filtered",
+			Body:   "",
+			State:  "open",
+		},
+	}
+
+	_, replayed, err := reconcile(context.Background(), mc, "owner", "repo", 1, true)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if replayed == nil {
+		t.Fatal("expected replayed issue")
+	}
+	// Status should still be open since the untrusted close was filtered.
+	if replayed.Status != model.StatusOpen {
+		t.Errorf("status: want open (untrusted close filtered), got %s", replayed.Status)
+	}
+	// Owner should be set by the trusted assign.
+	if replayed.Owner != "bob" {
+		t.Errorf("owner: want bob (trusted assign applied), got %s", replayed.Owner)
 	}
 }

@@ -8,7 +8,7 @@ import (
 
 // DBSchemaVersion is the current database schema version.
 // Bump this when adding migrations that change the schema.
-const DBSchemaVersion = 2
+const DBSchemaVersion = 3
 
 // downMigrations maps a version to the SQL needed to reverse it.
 // Version N's entry contains statements that undo the changes introduced
@@ -98,6 +98,9 @@ var migrations = []string{
 var alterMigrations = []string{
 	`ALTER TABLE repos ADD COLUMN issues_since TEXT DEFAULT ''`,
 	`ALTER TABLE issues ADD COLUMN comments TEXT DEFAULT '[]'`,
+	`ALTER TABLE repos ADD COLUMN trusted_authors_only INTEGER DEFAULT 0`,
+	`ALTER TABLE repos ADD COLUMN local_path TEXT DEFAULT ''`,
+	`ALTER TABLE repos ADD COLUMN socket_enabled INTEGER DEFAULT 0`,
 }
 
 // OpenRawDB opens a SQLite database without running migrations or

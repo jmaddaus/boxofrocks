@@ -12,14 +12,16 @@ From the root of a repo that uses Box of Rocks:
 
 ```bash
 go install github.com/jmaddaus/boxofrocks/cmd/bor@latest
-bor init
+bor init --socket
 ```
 
 `bor init` handles everything automatically:
 1. Starts the daemon in the background (if not already running)
 2. Checks for GitHub authentication
-3. Registers the repository
+3. Registers the repository (auto-detected from git remote)
 4. Triggers an initial sync
+
+The `--socket` flag enables a Unix domain socket at `.boxofrocks/bor.sock` so sandbox agents can access the daemon without network access.
 
 ## Authentication
 
@@ -80,11 +82,13 @@ The daemon stores its data in `~/.boxofrocks/`:
 ```bash
 bor list                  # List all open issues
 bor list --status closed  # List closed issues
-bor create --title "Fix bug" --type bug
+bor create "Fix bug" -t bug
 bor next                  # Get the next issue to work on
 bor update 42 --status in_progress
-bor assign 42 --owner @me
+bor assign 42 agent-1
 bor close 42
+bor config trusted-authors-only true   # Enable trusted author filtering
+bor config trusted-authors-only false  # Disable trusted author filtering
 ```
 
 Use `--pretty` for human-readable output, or pipe JSON (default) to `jq`.
@@ -117,3 +121,5 @@ go fmt ./...
 **"port :8042 already in use"** — Another daemon instance is running. Use `bor daemon stop` first, or check with `bor daemon status`.
 
 **Sync not working** — Check `bor daemon logs` for errors. Verify auth with `bor login --status`.
+
+**Comments from external contributors not syncing** — If `trusted-authors-only` is enabled (auto-enabled for public repos), comments from users who are not OWNER, MEMBER, COLLABORATOR, or CONTRIBUTOR are filtered. Disable with `bor config trusted-authors-only false`.

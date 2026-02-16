@@ -112,6 +112,10 @@ DELETE /issues/:id                # delete issue
 GET    /issues/next               # get highest priority open unassigned issue
 POST   /issues/:id/assign         # assign to agent/user
 
+POST   /repos                     # register a repo
+GET    /repos                     # list registered repos
+PATCH  /repos                     # update repo config (e.g., trusted_authors_only)
+
 GET    /health                    # daemon health + sync status
 POST   /sync                      # force immediate sync with GitHub
 ```
@@ -269,6 +273,19 @@ jobs:
             // Compute final state
             // Write state to issue body
 ```
+
+### Trusted Author Filtering
+
+On public GitHub repos, anyone can comment on issues. Since bor parses `[boxofrocks]`-formatted comments as events, a malicious user could inject status changes, assignments, or closes by posting crafted comments. To prevent this, inbound events are filtered by GitHub's `author_association` field.
+
+- **Trusted associations:** OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR
+- **Untrusted (filtered):** FIRST_TIMER, FIRST_TIME_CONTRIBUTOR, NONE
+- **Auto-enabled** for public repos during `bor init` (sets `RepoConfig.TrustedAuthorsOnly=true`)
+- **Off by default** for private repos (access is already restricted)
+- **Toggle per repo:** `bor config trusted-authors-only true/false` (calls `PATCH /repos`)
+- **Arbiter:** checks repo visibility via `GetRepo` API call; filters comments on public repos
+
+Filtered comments are silently skipped — they are not errors. The same `IsTrustedAuthor()` function is used in both the daemon sync layer and the arbiter to ensure consistency.
 
 ### Why No Race Conditions
 

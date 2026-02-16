@@ -25,13 +25,14 @@ Commands:
   update     Update an issue
   next       Get the next issue to work on
   assign     Assign an issue
+  config     Configure repo settings (trusted-authors-only)
   db         Database migration tools (version, check, downgrade)
   help       Show this help
   version    Show version
 
 Global Flags:
   --host URL     Daemon URL (default: $TRACKER_HOST or http://127.0.0.1:8042)
-  --repo NAME    Repository owner/name (default: auto-detect from git remote)
+  -r, --repo NAME  Repository owner/name (default: auto-detect from git remote)
   --pretty       Use pretty-printed output instead of JSON
 
 Run 'bor <command> --help' for more information on a command.`
@@ -65,7 +66,7 @@ func parseGlobalFlags(args []string) (globalFlags, []string) {
 		case strings.HasPrefix(remaining[0], "--host="):
 			gf.host = strings.TrimPrefix(remaining[0], "--host=")
 			remaining = remaining[1:]
-		case remaining[0] == "--repo" && len(remaining) > 1:
+		case (remaining[0] == "--repo" || remaining[0] == "-r") && len(remaining) > 1:
 			gf.repo = remaining[1]
 			remaining = remaining[2:]
 		case strings.HasPrefix(remaining[0], "--repo="):
@@ -137,6 +138,8 @@ func Run(args []string, version string) error {
 		return runNext(subArgs, gf)
 	case "assign":
 		return runAssign(subArgs, gf)
+	case "config":
+		return runConfig(subArgs, gf)
 	case "db":
 		return runDB(subArgs, gf)
 	default:

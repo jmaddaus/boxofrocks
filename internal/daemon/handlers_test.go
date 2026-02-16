@@ -627,6 +627,9 @@ func (noopGitHubClient) CreateLabel(ctx context.Context, owner, repo, name, colo
 func (noopGitHubClient) UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error {
 	return nil
 }
+func (noopGitHubClient) GetRepo(ctx context.Context, owner, repo string) (*github.GitHubRepo, error) {
+	return &github.GitHubRepo{Private: true}, nil
+}
 func (noopGitHubClient) GetRateLimit() github.RateLimit {
 	return github.RateLimit{Remaining: 5000, Reset: time.Now().Add(time.Hour)}
 }
@@ -893,5 +896,142 @@ func TestAddRepoWithoutSyncManager(t *testing.T) {
 	decodeJSON(t, rr, &repo)
 	if repo.Owner != "testorg" || repo.Name != "testrepo" {
 		t.Errorf("unexpected repo: %+v", repo)
+	}
+}
+
+func TestAddRepoWithSocketFields(t *testing.T) {
+	d := testDaemon(t)
+
+	rr := doRequest(t, d, "POST", "/repos", map[string]interface{}{
+		"owner":      "testorg",
+		"name":       "testrepo",
+		"local_path": "/tmp/testrepo",
+		"socket":     true,
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create repo: expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if repo.LocalPath != "/tmp/testrepo" {
+		t.Errorf("expected local_path '/tmp/testrepo', got %q", repo.LocalPath)
+	}
+	if !repo.SocketEnabled {
+		t.Error("expected socket_enabled=true")
+	}
+}
+
+func TestRepoResolutionWorkingDir(t *testing.T) {
+	d := testDaemon(t)
+
+	// Register two repos with different local paths.
+	doRequest(t, d, "POST", "/repos", map[string]interface{}{
+		"owner": "org1", "name": "repo1",
+		"local_path": "/home/user/projects/repo1", "socket": false,
+	})
+	doRequest(t, d, "POST", "/repos", map[string]interface{}{
+		"owner": "org2", "name": "repo2",
+		"local_path": "/home/user/projects/repo2", "socket": false,
+	})
+
+	// Create an issue with explicit repo param so we have something to list.
+	doRequest(t, d, "POST", "/issues?repo=org1/repo1", map[string]interface{}{
+		"title": "issue in repo1",
+	})
+	doRequest(t, d, "POST", "/issues?repo=org2/repo2", map[string]interface{}{
+		"title": "issue in repo2",
+	})
+
+	// List issues using X-Working-Dir matching repo1's local path.
+	rr := doRequestWithHeader(t, d, "GET", "/issues", "X-Working-Dir", "/home/user/projects/repo1", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list with working dir: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var issues []*model.Issue
+	decodeJSON(t, rr, &issues)
+	if len(issues) != 1 || issues[0].Title != "issue in repo1" {
+		t.Errorf("expected 1 issue in repo1, got %d", len(issues))
+	}
+
+	// Subdirectory should also resolve to repo2.
+	rr = doRequestWithHeader(t, d, "GET", "/issues", "X-Working-Dir", "/home/user/projects/repo2/src/pkg", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list with subdir: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	decodeJSON(t, rr, &issues)
+	if len(issues) != 1 || issues[0].Title != "issue in repo2" {
+		t.Errorf("expected 1 issue in repo2, got %d", len(issues))
+	}
+}
+
+func TestUpdateRepoSocketEnabled(t *testing.T) {
+	d := testDaemon(t)
+
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+
+	// Enable socket.
+	rr := doRequest(t, d, "PATCH", "/repos?repo=o/r", map[string]interface{}{
+		"local_path":     "/tmp/repo",
+		"socket_enabled": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update repo: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if !repo.SocketEnabled {
+		t.Error("expected socket_enabled=true")
+	}
+	if repo.LocalPath != "/tmp/repo" {
+		t.Errorf("expected local_path '/tmp/repo', got %q", repo.LocalPath)
+	}
+
+	// Disable socket.
+	rr = doRequest(t, d, "PATCH", "/repos?repo=o/r", map[string]interface{}{
+		"socket_enabled": false,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update repo: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	decodeJSON(t, rr, &repo)
+	if repo.SocketEnabled {
+		t.Error("expected socket_enabled=false")
+	}
+}
+
+func TestUpdateRepoTrustedAuthorsOnly(t *testing.T) {
+	d := testDaemon(t)
+
+	// Create a repo first.
+	doRequest(t, d, "POST", "/repos", map[string]string{"owner": "o", "name": "r"})
+
+	// Enable trusted_authors_only.
+	rr := doRequest(t, d, "PATCH", "/repos?repo=o/r", map[string]interface{}{
+		"trusted_authors_only": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update repo: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var repo model.RepoConfig
+	decodeJSON(t, rr, &repo)
+	if !repo.TrustedAuthorsOnly {
+		t.Error("expected trusted_authors_only=true")
+	}
+
+	// Disable it.
+	rr = doRequest(t, d, "PATCH", "/repos?repo=o/r", map[string]interface{}{
+		"trusted_authors_only": false,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update repo: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	decodeJSON(t, rr, &repo)
+	if repo.TrustedAuthorsOnly {
+		t.Error("expected trusted_authors_only=false")
 	}
 }

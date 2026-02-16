@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ func runInit(args []string, gf globalFlags) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	repoFlag := fs.String("repo", "", "Repository in owner/name format")
 	offline := fs.Bool("offline", false, "Skip initial sync")
+	socketFlag := fs.Bool("socket", false, "Enable Unix domain socket for sandbox agents")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -57,9 +59,25 @@ func runInit(args []string, gf globalFlags) error {
 	}
 
 	// Step 3: Register the repo via daemon API.
+	repoBody := map[string]interface{}{
+		"owner": parts[0],
+		"name":  parts[1],
+	}
+	if *socketFlag {
+		localPath, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("get working directory: %w", err)
+		}
+		repoBody["local_path"] = localPath
+		repoBody["socket"] = true
+	}
+
 	alreadyRegistered := false
-	if err := client.CreateRepo(parts[0], parts[1]); err != nil {
-		// If it already exists (409 conflict), that is acceptable.
+	resp, err := client.Do("POST", "/repos", repoBody)
+	if err != nil {
+		return fmt.Errorf("register repo: %w", err)
+	}
+	if err := decodeOrError(resp, nil); err != nil {
 		if !strings.Contains(err.Error(), "409") {
 			return fmt.Errorf("register repo: %w", err)
 		}
@@ -67,9 +85,25 @@ func runInit(args []string, gf globalFlags) error {
 		if gf.pretty {
 			fmt.Printf("Repository %s already registered.\n", repo)
 		}
+		// If --socket was requested on an already-registered repo, enable it via update.
+		if *socketFlag {
+			localPath, _ := os.Getwd()
+			if _, updateErr := client.UpdateRepo(repo, map[string]interface{}{
+				"local_path":     localPath,
+				"socket_enabled": true,
+			}); updateErr != nil {
+				return fmt.Errorf("enable socket on existing repo: %w", updateErr)
+			}
+			if gf.pretty {
+				fmt.Println("Unix socket enabled.")
+			}
+		}
 	} else {
 		if gf.pretty {
 			fmt.Printf("Repository %s registered.\n", repo)
+			if *socketFlag {
+				fmt.Println("Unix socket enabled.")
+			}
 		}
 	}
 

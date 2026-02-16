@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // ---------------------------------------------------------------------------
 
 // resolveRepo determines the target repo from the request.
-// Priority: ?repo= query param > X-Repo header > single registered repo.
+// Priority: ?repo= query param > X-Repo header > socket association > single registered repo.
 func (d *Daemon) resolveRepo(r *http.Request) (*model.RepoConfig, error) {
 	ctx := r.Context()
 
@@ -83,7 +84,44 @@ func (d *Daemon) resolveRepo(r *http.Request) (*model.RepoConfig, error) {
 		return repo, nil
 	}
 
-	// 3. Implicit: exactly one repo registered.
+	// 3. Socket association: if the request arrived via a Unix socket,
+	// the repo ID was injected into the context by connContext.
+	if repoID, ok := ctx.Value(socketRepoIDKey).(int); ok {
+		repo, err := d.store.GetRepo(ctx, repoID)
+		if err != nil {
+			return nil, fmt.Errorf("socket-associated repo (id=%d) not found", repoID)
+		}
+		return repo, nil
+	}
+
+	// 4. Working directory: if the CLI sent X-Working-Dir, match it against
+	// registered repos' LocalPath (exact match or subdirectory).
+	if workDir := r.Header.Get("X-Working-Dir"); workDir != "" {
+		repos, err := d.store.ListRepos(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list repos: %w", err)
+		}
+		var best *model.RepoConfig
+		bestLen := 0
+		for _, repo := range repos {
+			if repo.LocalPath == "" {
+				continue
+			}
+			// Match if workDir is exactly LocalPath or a subdirectory of it.
+			lp := repo.LocalPath
+			if workDir == lp || strings.HasPrefix(workDir, lp+"/") {
+				if len(lp) > bestLen {
+					best = repo
+					bestLen = len(lp)
+				}
+			}
+		}
+		if best != nil {
+			return best, nil
+		}
+	}
+
+	// 5. Implicit: exactly one repo registered.
 	repos, err := d.store.ListRepos(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list repos: %w", err)
@@ -181,8 +219,10 @@ func (d *Daemon) forceSync(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type addRepoRequest struct {
-	Owner string `json:"owner"`
-	Name  string `json:"name"`
+	Owner     string `json:"owner"`
+	Name      string `json:"name"`
+	LocalPath string `json:"local_path,omitempty"`
+	Socket    bool   `json:"socket,omitempty"`
 }
 
 func (d *Daemon) addRepo(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +244,34 @@ func (d *Daemon) addRepo(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Auto-detect repo visibility and enable trusted-author filtering for public repos.
+	if d.ghClient != nil {
+		ghRepo, err := d.ghClient.GetRepo(r.Context(), req.Owner, req.Name)
+		if err != nil {
+			slog.Warn("could not check repo visibility", "repo", repo.FullName(), "error", err)
+		} else if !ghRepo.Private {
+			repo.TrustedAuthorsOnly = true
+			if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
+				slog.Warn("could not save trusted_authors_only setting", "repo", repo.FullName(), "error", err)
+			}
+		}
+	}
+
+	// Enable Unix domain socket if requested.
+	if req.LocalPath != "" || req.Socket {
+		if req.LocalPath != "" {
+			repo.LocalPath = req.LocalPath
+		}
+		repo.SocketEnabled = req.Socket
+		if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
+			slog.Warn("could not save socket settings", "repo", repo.FullName(), "error", err)
+		} else if repo.SocketEnabled && repo.LocalPath != "" {
+			if err := d.CreateSocketForRepo(repo); err != nil {
+				slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+			}
+		}
 	}
 
 	if d.syncMgr != nil {
@@ -782,4 +850,65 @@ func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, issue)
+}
+
+// ---------------------------------------------------------------------------
+// Repo config update
+// ---------------------------------------------------------------------------
+
+type updateRepoRequest struct {
+	TrustedAuthorsOnly *bool   `json:"trusted_authors_only"`
+	LocalPath          *string `json:"local_path"`
+	SocketEnabled      *bool   `json:"socket_enabled"`
+}
+
+func (d *Daemon) updateRepo(w http.ResponseWriter, r *http.Request) {
+	repo, err := d.resolveRepo(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var req updateRepoRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if req.TrustedAuthorsOnly != nil {
+		repo.TrustedAuthorsOnly = *req.TrustedAuthorsOnly
+	}
+	if req.LocalPath != nil {
+		repo.LocalPath = *req.LocalPath
+	}
+
+	oldSocketEnabled := repo.SocketEnabled
+	if req.SocketEnabled != nil {
+		repo.SocketEnabled = *req.SocketEnabled
+	}
+
+	if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
+		writeError(w, http.StatusInternalServerError, "update repo: "+err.Error())
+		return
+	}
+
+	// Toggle socket on/off as needed.
+	if repo.SocketEnabled && repo.LocalPath != "" && !oldSocketEnabled {
+		if err := d.CreateSocketForRepo(repo); err != nil {
+			slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+		}
+	} else if !repo.SocketEnabled && oldSocketEnabled && repo.LocalPath != "" {
+		// Compute the socket path manually since SocketEnabled is now false.
+		sockPath := filepath.Join(repo.LocalPath, ".boxofrocks", "bor.sock")
+		d.removeSocket(sockPath)
+	}
+
+	// Re-fetch to return canonical state.
+	repo, err = d.store.GetRepo(r.Context(), repo.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, repo)
 }

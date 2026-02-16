@@ -1,14 +1,19 @@
 # Agent Instruction Templates
 
-Drop-in instruction files that teach AI coding agents to use `bor` for task management.
+Drop-in instruction files that teach AI coding agents to use `bor` for task management via Unix domain sockets. No binary installation needed in the sandbox — agents use `curl --unix-socket` to talk to the daemon on the host.
 
-## Install bor
+## Setup
+
+On the host machine:
 
 ```bash
 go install github.com/jmaddaus/boxofrocks/cmd/bor@latest
 bor daemon start
-bor init owner/repo          # one-time per repository
+cd /path/to/your/repo
+bor init --repo owner/name --socket    # creates .boxofrocks/bor.sock
 ```
+
+The `--socket` flag tells the daemon to listen on a Unix domain socket at `.boxofrocks/bor.sock` inside the repo directory. Since sandboxes automatically mount the repo, the socket is available to agents with zero extra config.
 
 ## Templates
 
@@ -27,12 +32,12 @@ Replace these in the template after copying:
 |-------------|-------------|---------|
 | `{{AGENT_NAME}}` | Name the agent uses to claim issues | `claude`, `cursor`, `copilot` |
 | `{{REPO}}` | GitHub repo in `owner/name` format | `acme/webapp` |
-| `{{TRACKER_HOST}}` | Daemon URL (only needed for sandboxes/containers) | `http://host.docker.internal:8042` |
 
-## Docker / Sandbox Environments
+## How It Works
 
-When the agent runs inside a container or sandbox, the daemon on the host is not reachable at `localhost`. Set the `TRACKER_HOST` environment variable:
+The daemon on the host listens on both TCP (`:8042`) and a per-repo Unix domain socket (`.boxofrocks/bor.sock`). Users interact via `bor` CLI commands over TCP. Sandbox agents use `curl --unix-socket` over the mounted socket file — no network access or binary installation required.
 
-```bash
-export TRACKER_HOST=http://host.docker.internal:8042
+```
+Host:     bor CLI ──TCP──> daemon ──> SQLite
+Sandbox:  curl --unix-socket .boxofrocks/bor.sock ──> daemon (same)
 ```

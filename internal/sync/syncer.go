@@ -542,6 +542,22 @@ func (rs *RepoSyncer) processGitHubIssue(ctx context.Context, ghIssue *github.Gi
 		return fmt.Errorf("list comments: %w", err)
 	}
 
+	// Filter out untrusted author comments when TrustedAuthorsOnly is enabled.
+	if rs.repo.TrustedAuthorsOnly {
+		trusted := make([]*github.GitHubComment, 0, len(comments))
+		for _, c := range comments {
+			if github.IsTrustedAuthor(c.AuthorAssociation) {
+				trusted = append(trusted, c)
+			} else if c.AuthorAssociation != "" {
+				slog.Debug("skipping comment from untrusted author",
+					"repo", rs.repo.FullName(),
+					"comment_id", c.ID,
+					"author_association", c.AuthorAssociation)
+			}
+		}
+		comments = trusted
+	}
+
 	if full {
 		// Full replay: parse all comments into events and replay.
 		if err := rs.fullReplayComments(ctx, localIssue, comments, ghIssue.Number); err != nil {

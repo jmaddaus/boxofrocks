@@ -223,6 +223,10 @@ func (m *mockGitHubClient) UpdateIssueState(ctx context.Context, owner, repo str
 	return fmt.Errorf("issue %d not found", number)
 }
 
+func (m *mockGitHubClient) GetRepo(ctx context.Context, owner, repo string) (*github.GitHubRepo, error) {
+	return &github.GitHubRepo{Private: true}, nil
+}
+
 func (m *mockGitHubClient) GetRateLimit() github.RateLimit {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1204,5 +1208,182 @@ func TestRepoSyncer_IdleStatus(t *testing.T) {
 	st = rs.getStatus()
 	if !st.Idle {
 		t.Error("expected Idle=true after exceeding idle threshold")
+	}
+}
+
+func TestPullInbound_TrustedAuthorsOnly_SkipsUntrusted(t *testing.T) {
+	s, gh, repo := setupTest(t)
+	ctx := context.Background()
+
+	// Enable trusted author filtering on the repo.
+	repo.TrustedAuthorsOnly = true
+	if err := s.UpdateRepo(ctx, repo); err != nil {
+		t.Fatalf("update repo: %v", err)
+	}
+
+	// Set up a local issue with a GitHub ID.
+	ghID := 30
+	issue := &model.Issue{
+		RepoID:    repo.ID,
+		GitHubID:  &ghID,
+		Title:     "Trusted Author Test",
+		Status:    model.StatusOpen,
+		IssueType: model.IssueTypeTask,
+		Labels:    []string{},
+	}
+	created, err := s.CreateIssue(ctx, issue)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	// Append a create event.
+	createEv := &model.Event{
+		RepoID:    repo.ID,
+		IssueID:   created.ID,
+		Timestamp: time.Now().UTC().Add(-1 * time.Hour),
+		Action:    model.ActionCreate,
+		Payload:   makeCreatePayload("Trusted Author Test", ""),
+		Agent:     "test",
+		Synced:    1,
+	}
+	if _, err := s.AppendEvent(ctx, createEv); err != nil {
+		t.Fatalf("append create event: %v", err)
+	}
+
+	// Add a GitHub issue.
+	ghIssue := &github.GitHubIssue{
+		Number:    30,
+		Title:     "Trusted Author Test",
+		State:     "open",
+		Labels:    []github.GitHubLabel{{Name: "boxofrocks"}},
+		CreatedAt: time.Now().UTC().Add(-1 * time.Hour),
+		UpdatedAt: time.Now().UTC(),
+	}
+	gh.addGitHubIssue("testowner", "testrepo", ghIssue)
+
+	// Add an untrusted author comment (should be skipped).
+	untrustedEv := &model.Event{
+		Timestamp: time.Now().UTC(),
+		Action:    model.ActionStatusChange,
+		Payload:   makeStatusChangePayload(model.StatusInProgress),
+		Agent:     "malicious-agent",
+	}
+	gh.addGitHubComment("testowner", "testrepo", 30, &github.GitHubComment{
+		ID:                5001,
+		Body:              github.FormatEventComment(untrustedEv),
+		AuthorAssociation: "NONE",
+		CreatedAt:         time.Now().UTC(),
+	})
+
+	// Add a trusted author comment (should be applied).
+	trustedEv := &model.Event{
+		Timestamp: time.Now().UTC(),
+		Action:    model.ActionAssign,
+		Payload:   `{"owner":"alice"}`,
+		Agent:     "trusted-agent",
+	}
+	gh.addGitHubComment("testowner", "testrepo", 30, &github.GitHubComment{
+		ID:                5002,
+		Body:              github.FormatEventComment(trustedEv),
+		AuthorAssociation: "COLLABORATOR",
+		CreatedAt:         time.Now().UTC(),
+	})
+
+	// Run pull with TrustedAuthorsOnly enabled.
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+	pulled, err := rs.pullInbound(ctx)
+	if err != nil {
+		t.Fatalf("pullInbound: %v", err)
+	}
+	if !pulled {
+		t.Fatal("expected pullInbound to report activity")
+	}
+
+	// Verify the untrusted status change was NOT applied.
+	updated, err := s.GetIssue(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if updated.Status != model.StatusOpen {
+		t.Errorf("expected status open (untrusted change should be skipped), got %s", updated.Status)
+	}
+
+	// Verify the trusted assign was applied.
+	if updated.Owner != "alice" {
+		t.Errorf("expected owner 'alice' (trusted change should be applied), got '%s'", updated.Owner)
+	}
+}
+
+func TestPullInbound_TrustedAuthorsOnly_DisabledAllowsAll(t *testing.T) {
+	s, gh, repo := setupTest(t)
+	ctx := context.Background()
+
+	// TrustedAuthorsOnly is false (default).
+
+	// Set up a local issue.
+	ghID := 31
+	issue := &model.Issue{
+		RepoID:    repo.ID,
+		GitHubID:  &ghID,
+		Title:     "No Filter Test",
+		Status:    model.StatusOpen,
+		IssueType: model.IssueTypeTask,
+		Labels:    []string{},
+	}
+	created, err := s.CreateIssue(ctx, issue)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	createEv := &model.Event{
+		RepoID:    repo.ID,
+		IssueID:   created.ID,
+		Timestamp: time.Now().UTC().Add(-1 * time.Hour),
+		Action:    model.ActionCreate,
+		Payload:   makeCreatePayload("No Filter Test", ""),
+		Agent:     "test",
+		Synced:    1,
+	}
+	if _, err := s.AppendEvent(ctx, createEv); err != nil {
+		t.Fatalf("append create event: %v", err)
+	}
+
+	ghIssue := &github.GitHubIssue{
+		Number:    31,
+		Title:     "No Filter Test",
+		State:     "open",
+		Labels:    []github.GitHubLabel{{Name: "boxofrocks"}},
+		CreatedAt: time.Now().UTC().Add(-1 * time.Hour),
+		UpdatedAt: time.Now().UTC(),
+	}
+	gh.addGitHubIssue("testowner", "testrepo", ghIssue)
+
+	// Add a comment with AuthorAssociation="NONE" — should still be applied when filtering is off.
+	statusEv := &model.Event{
+		Timestamp: time.Now().UTC(),
+		Action:    model.ActionStatusChange,
+		Payload:   makeStatusChangePayload(model.StatusInProgress),
+		Agent:     "anyone",
+	}
+	gh.addGitHubComment("testowner", "testrepo", 31, &github.GitHubComment{
+		ID:                6001,
+		Body:              github.FormatEventComment(statusEv),
+		AuthorAssociation: "NONE",
+		CreatedAt:         time.Now().UTC(),
+	})
+
+	sm := NewSyncManager(s, gh)
+	rs := newRepoSyncer(repo, s, gh, sm, 5*time.Second)
+	if _, err := rs.pullInbound(ctx); err != nil {
+		t.Fatalf("pullInbound: %v", err)
+	}
+
+	updated, err := s.GetIssue(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if updated.Status != model.StatusInProgress {
+		t.Errorf("expected status in_progress (no filter), got %s", updated.Status)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -14,14 +15,18 @@ import (
 
 // Client is an HTTP client wrapper for communicating with the daemon.
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL    string
+	http       *http.Client
+	workingDir string // sent as X-Working-Dir for path-based repo resolution
 }
 
 // NewClient creates a new Client targeting the given daemon host.
+// It captures the current working directory for path-based repo resolution.
 func NewClient(host string) *Client {
+	wd, _ := os.Getwd()
 	return &Client{
-		baseURL: host,
+		baseURL:    host,
+		workingDir: wd,
 		http: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -49,6 +54,9 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
+	if c.workingDir != "" {
+		req.Header.Set("X-Working-Dir", c.workingDir)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -271,6 +279,23 @@ func (c *Client) Health() (map[string]interface{}, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// UpdateRepo updates repo settings (e.g., trusted_authors_only).
+func (c *Client) UpdateRepo(repo string, fields map[string]interface{}) (*model.RepoConfig, error) {
+	path := "/repos"
+	if repo != "" {
+		path += "?repo=" + repo
+	}
+	resp, err := c.Do("PATCH", path, fields)
+	if err != nil {
+		return nil, err
+	}
+	var rc model.RepoConfig
+	if err := decodeOrError(resp, &rc); err != nil {
+		return nil, err
+	}
+	return &rc, nil
 }
 
 // ForceSync triggers a sync for the given repo.

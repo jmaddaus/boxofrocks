@@ -22,13 +22,14 @@ const (
 
 // GitHubIssue represents a GitHub issue from the REST API.
 type GitHubIssue struct {
-	Number    int           `json:"number"`
-	Title     string        `json:"title"`
-	Body      string        `json:"body"`
-	State     string        `json:"state"`
-	Labels    []GitHubLabel `json:"labels"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	Number            int           `json:"number"`
+	Title             string        `json:"title"`
+	Body              string        `json:"body"`
+	State             string        `json:"state"`
+	Labels            []GitHubLabel `json:"labels"`
+	AuthorAssociation string        `json:"author_association"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
 }
 
 // GitHubLabel represents a label on a GitHub issue.
@@ -38,9 +39,15 @@ type GitHubLabel struct {
 
 // GitHubComment represents a comment on a GitHub issue.
 type GitHubComment struct {
-	ID        int       `json:"id"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                int       `json:"id"`
+	Body              string    `json:"body"`
+	AuthorAssociation string    `json:"author_association"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+// GitHubRepo represents a GitHub repository from the REST API.
+type GitHubRepo struct {
+	Private bool `json:"private"`
 }
 
 // ListOpts holds optional parameters for list operations.
@@ -61,6 +68,7 @@ type RateLimit struct {
 type Client interface {
 	ListIssues(ctx context.Context, owner, repo string, opts ListOpts) ([]*GitHubIssue, string, error)
 	GetIssue(ctx context.Context, owner, repo string, number int) (*GitHubIssue, error)
+	GetRepo(ctx context.Context, owner, repo string) (*GitHubRepo, error)
 	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (*GitHubIssue, error)
 	UpdateIssueBody(ctx context.Context, owner, repo string, number int, body string) error
 	UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error
@@ -272,6 +280,45 @@ func (c *clientImpl) GetIssue(ctx context.Context, owner, repo string, number in
 	}
 
 	return &issue, nil
+}
+
+// GetRepo fetches repository metadata (including visibility).
+func (c *clientImpl) GetRepo(ctx context.Context, owner, repo string) (*GitHubRepo, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s", c.baseURL, owner, repo)
+
+	req, err := c.newRequest(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get repo: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get repo: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var ghRepo GitHubRepo
+	if err := json.NewDecoder(resp.Body).Decode(&ghRepo); err != nil {
+		return nil, fmt.Errorf("get repo: decode response: %w", err)
+	}
+
+	return &ghRepo, nil
+}
+
+// IsTrustedAuthor returns true if the given GitHub author_association value
+// indicates a trusted contributor (OWNER, MEMBER, COLLABORATOR, or CONTRIBUTOR).
+func IsTrustedAuthor(association string) bool {
+	switch strings.ToUpper(association) {
+	case "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR":
+		return true
+	default:
+		return false
+	}
 }
 
 // CreateIssue creates a new issue in the specified repository.
