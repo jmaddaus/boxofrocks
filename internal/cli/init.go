@@ -15,6 +15,7 @@ func runInit(args []string, gf globalFlags) error {
 	repoFlag := fs.String("repo", "", "Repository in owner/name format")
 	offline := fs.Bool("offline", false, "Skip initial sync")
 	socketFlag := fs.Bool("socket", false, "Enable Unix domain socket for sandbox agents")
+	jsonFlag := fs.Bool("json", false, "Enable file-based queue for sandbox agents")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -71,6 +72,9 @@ func runInit(args []string, gf globalFlags) error {
 	if *socketFlag {
 		repoBody["socket"] = true
 	}
+	if *jsonFlag {
+		repoBody["queue"] = true
+	}
 
 	alreadyRegistered := false
 	resp, err := client.Do("POST", "/repos", repoBody)
@@ -85,12 +89,15 @@ func runInit(args []string, gf globalFlags) error {
 		if gf.pretty {
 			fmt.Printf("Repository %s already registered.\n", repo)
 		}
-		// Always update local_path; enable socket if --socket was requested.
+		// Always update local_path; enable socket/queue if flags were requested.
 		updateBody := map[string]interface{}{
 			"local_path": localPath,
 		}
 		if *socketFlag {
 			updateBody["socket_enabled"] = true
+		}
+		if *jsonFlag {
+			updateBody["queue_enabled"] = true
 		}
 		if _, updateErr := client.UpdateRepo(repo, updateBody); updateErr != nil {
 			return fmt.Errorf("update repo: %w", updateErr)
@@ -98,11 +105,17 @@ func runInit(args []string, gf globalFlags) error {
 		if gf.pretty && *socketFlag {
 			fmt.Println("Unix socket enabled.")
 		}
+		if gf.pretty && *jsonFlag {
+			fmt.Println("File queue enabled.")
+		}
 	} else {
 		if gf.pretty {
 			fmt.Printf("Repository %s registered.\n", repo)
 			if *socketFlag {
 				fmt.Println("Unix socket enabled.")
+			}
+			if *jsonFlag {
+				fmt.Println("File queue enabled.")
 			}
 		}
 	}

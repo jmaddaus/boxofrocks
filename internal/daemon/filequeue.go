@@ -60,7 +60,7 @@ func (w *queueResponseWriter) WriteHeader(statusCode int) {
 // ---------------------------------------------------------------------------
 
 // startFileQueues iterates registered repos and starts file queues for those
-// with SocketEnabled and a LocalPath.
+// with QueueEnabled and a LocalPath.
 func (d *Daemon) startFileQueues() {
 	repos, err := d.store.ListRepos(context.Background())
 	if err != nil {
@@ -68,7 +68,7 @@ func (d *Daemon) startFileQueues() {
 		return
 	}
 	for _, repo := range repos {
-		if repo.SocketEnabled && repo.LocalPath != "" {
+		if repo.QueueEnabled && repo.LocalPath != "" {
 			if err := d.startFileQueue(repo); err != nil {
 				slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
 			}

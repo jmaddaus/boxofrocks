@@ -24,12 +24,12 @@ func setupQueueTest(t *testing.T) (*Daemon, *model.RepoConfig, string) {
 	tmpDir := t.TempDir()
 	queueDir := filepath.Join(tmpDir, ".boxofrocks", "queue")
 
-	// Register a repo with local path and socket enabled.
+	// Register a repo with local path and queue enabled.
 	rr := doRequest(t, d, "POST", "/repos", map[string]interface{}{
 		"owner":      "org",
 		"name":       "repo",
 		"local_path": tmpDir,
-		"socket":     true,
+		"queue":      true,
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create repo: expected 201, got %d: %s", rr.Code, rr.Body.String())
@@ -339,7 +339,7 @@ func TestFileQueueRepoContext(t *testing.T) {
 	// Register two repos.
 	rr := doRequest(t, d, "POST", "/repos", map[string]interface{}{
 		"owner": "org1", "name": "repo1",
-		"local_path": tmpDir1, "socket": true,
+		"local_path": tmpDir1, "queue": true,
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create repo1: %d: %s", rr.Code, rr.Body.String())
@@ -349,7 +349,7 @@ func TestFileQueueRepoContext(t *testing.T) {
 
 	rr = doRequest(t, d, "POST", "/repos", map[string]interface{}{
 		"owner": "org2", "name": "repo2",
-		"local_path": tmpDir2, "socket": true,
+		"local_path": tmpDir2, "queue": true,
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create repo2: %d: %s", rr.Code, rr.Body.String())

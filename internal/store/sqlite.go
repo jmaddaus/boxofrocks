@@ -68,21 +68,21 @@ func (s *SQLiteStore) AddRepo(ctx context.Context, owner, name string) (*model.R
 
 func (s *SQLiteStore) GetRepo(ctx context.Context, id int) (*model.RepoConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, trusted_authors_only, local_path, socket_enabled, created_at
+		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, trusted_authors_only, local_path, socket_enabled, queue_enabled, created_at
 		 FROM repos WHERE id = ?`, id)
 	return scanRepo(row)
 }
 
 func (s *SQLiteStore) GetRepoByName(ctx context.Context, owner, name string) (*model.RepoConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, trusted_authors_only, local_path, socket_enabled, created_at
+		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, trusted_authors_only, local_path, socket_enabled, queue_enabled, created_at
 		 FROM repos WHERE owner = ? AND name = ?`, owner, name)
 	return scanRepo(row)
 }
 
 func (s *SQLiteStore) ListRepos(ctx context.Context) ([]*model.RepoConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, trusted_authors_only, local_path, socket_enabled, created_at
+		`SELECT id, owner, name, poll_interval_ms, last_sync_at, issues_etag, issues_since, trusted_authors_only, local_path, socket_enabled, queue_enabled, created_at
 		 FROM repos ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -114,10 +114,14 @@ func (s *SQLiteStore) UpdateRepo(ctx context.Context, repo *model.RepoConfig) er
 	if repo.SocketEnabled {
 		socketInt = 1
 	}
+	queueInt := 0
+	if repo.QueueEnabled {
+		queueInt = 1
+	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE repos SET owner=?, name=?, poll_interval_ms=?, last_sync_at=?, issues_etag=?, issues_since=?, trusted_authors_only=?, local_path=?, socket_enabled=?
+		`UPDATE repos SET owner=?, name=?, poll_interval_ms=?, last_sync_at=?, issues_etag=?, issues_since=?, trusted_authors_only=?, local_path=?, socket_enabled=?, queue_enabled=?
 		 WHERE id=?`,
-		repo.Owner, repo.Name, repo.PollIntervalMs, lastSync, repo.IssuesETag, repo.IssuesSince, trustedInt, repo.LocalPath, socketInt, repo.ID)
+		repo.Owner, repo.Name, repo.PollIntervalMs, lastSync, repo.IssuesETag, repo.IssuesSince, trustedInt, repo.LocalPath, socketInt, queueInt, repo.ID)
 	return err
 }
 
@@ -416,13 +420,15 @@ func scanRepo(row scanner) (*model.RepoConfig, error) {
 	var lastSync sql.NullString
 	var trustedInt int
 	var socketInt int
+	var queueInt int
 	var createdAt string
-	err := row.Scan(&r.ID, &r.Owner, &r.Name, &r.PollIntervalMs, &lastSync, &r.IssuesETag, &r.IssuesSince, &trustedInt, &r.LocalPath, &socketInt, &createdAt)
+	err := row.Scan(&r.ID, &r.Owner, &r.Name, &r.PollIntervalMs, &lastSync, &r.IssuesETag, &r.IssuesSince, &trustedInt, &r.LocalPath, &socketInt, &queueInt, &createdAt)
 	if err != nil {
 		return nil, err
 	}
 	r.TrustedAuthorsOnly = trustedInt != 0
 	r.SocketEnabled = socketInt != 0
+	r.QueueEnabled = queueInt != 0
 	r.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	if r.CreatedAt.IsZero() {
 		// Fallback: the SQLite default uses datetime('now') which is "2006-01-02 15:04:05"

@@ -1,6 +1,8 @@
+<!-- @format -->
+
 # Box of Rocks (`bor`)
 
-A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background.  Daemon uses http to coordinate between any number of local agents/humans across multiple repos.  Supports unix socket and file-based queue in repo to communicate with default docker sandbox images and other VMs.  Launch simple web UI at localhost:8042.
+A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: comments form an append-only event log, and a GitHub Action arbiter computes authoritative state. The daemon caches locally in SQLite for instant reads and manages bidirectional sync in the background. Daemon uses http to coordinate between any number of local agents/humans across multiple repos. Supports unix socket and file-based queue in repo to communicate with default docker sandbox images and other VMs. Launch simple web UI at localhost:8042.
 
 ## Quick Start
 
@@ -9,7 +11,9 @@ A daemon + CLI issue tracker backed by GitHub Issues. Issues are event-sourced: 
 go build -o bor ./cmd/bor
 
 # Initialize a repo (auto-starts daemon in background)
-bor init #--socket if you need unix socket / file queue for sandbox comms
+bor init
+#bor init --socket if you need unix socket / file queue for VM comms Linux -> Linux.
+#bor init --json if you need json path for sandbox comms Linux -> Win/Mac/Linux.
 
 # Create and manage issues
 bor create "Fix login bug" -p 1 -t bug -d "Users can't log in with SSO"
@@ -58,9 +62,9 @@ Config is stored at `~/.boxofrocks/config.json`:
 
 ```json
 {
-  "listen_addr": ":8042",
-  "data_dir": "~/.boxofrocks",
-  "db_path": "~/.boxofrocks/bor.db"
+	"listen_addr": ":8042",
+	"data_dir": "~/.boxofrocks",
+	"db_path": "~/.boxofrocks/bor.db"
 }
 ```
 
@@ -88,11 +92,11 @@ bor logout                 # Remove stored token
 
 ### Global Flags
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--host URL` | Daemon URL | `$TRACKER_HOST` or `http://127.0.0.1:8042` |
+| Flag                | Description             | Default                                            |
+| ------------------- | ----------------------- | -------------------------------------------------- |
+| `--host URL`        | Daemon URL              | `$TRACKER_HOST` or `http://127.0.0.1:8042`         |
 | `-r`, `--repo NAME` | Repository `owner/name` | Auto-detected from git remote or working directory |
-| `--pretty` | Human-readable output | JSON output |
+| `--pretty`          | Human-readable output   | JSON output                                        |
 
 ### Commands
 

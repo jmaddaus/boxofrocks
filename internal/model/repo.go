@@ -16,6 +16,7 @@ type RepoConfig struct {
 	TrustedAuthorsOnly bool       `json:"trusted_authors_only"`
 	LocalPath          string     `json:"local_path,omitempty"`
 	SocketEnabled      bool       `json:"socket_enabled"`
+	QueueEnabled       bool       `json:"queue_enabled"`
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
@@ -34,9 +35,9 @@ func (r *RepoConfig) SocketPath() string {
 }
 
 // QueueDir returns the path to the file-based queue directory for this repo,
-// or "" if socket is not enabled or local path is not set.
+// or "" if queue is not enabled or local path is not set.
 func (r *RepoConfig) QueueDir() string {
-	if !r.SocketEnabled || r.LocalPath == "" {
+	if !r.QueueEnabled || r.LocalPath == "" {
 		return ""
 	}
 	return filepath.Join(r.LocalPath, ".boxofrocks", "queue")

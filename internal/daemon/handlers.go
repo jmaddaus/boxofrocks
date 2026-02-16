@@ -223,6 +223,7 @@ type addRepoRequest struct {
 	Name      string `json:"name"`
 	LocalPath string `json:"local_path,omitempty"`
 	Socket    bool   `json:"socket,omitempty"`
+	Queue     bool   `json:"queue,omitempty"`
 }
 
 func (d *Daemon) addRepo(w http.ResponseWriter, r *http.Request) {
@@ -259,20 +260,25 @@ func (d *Daemon) addRepo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enable Unix domain socket if requested.
-	if req.LocalPath != "" || req.Socket {
+	// Enable Unix domain socket and/or file queue if requested.
+	if req.LocalPath != "" || req.Socket || req.Queue {
 		if req.LocalPath != "" {
 			repo.LocalPath = req.LocalPath
 		}
 		repo.SocketEnabled = req.Socket
+		repo.QueueEnabled = req.Queue
 		if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
-			slog.Warn("could not save socket settings", "repo", repo.FullName(), "error", err)
-		} else if repo.SocketEnabled && repo.LocalPath != "" {
-			if err := d.CreateSocketForRepo(repo); err != nil {
-				slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+			slog.Warn("could not save socket/queue settings", "repo", repo.FullName(), "error", err)
+		} else {
+			if repo.SocketEnabled && repo.LocalPath != "" {
+				if err := d.CreateSocketForRepo(repo); err != nil {
+					slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
+				}
 			}
-			if err := d.startFileQueue(repo); err != nil {
-				slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
+			if repo.QueueEnabled && repo.LocalPath != "" {
+				if err := d.startFileQueue(repo); err != nil {
+					slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
+				}
 			}
 		}
 	}
@@ -863,6 +869,7 @@ type updateRepoRequest struct {
 	TrustedAuthorsOnly *bool   `json:"trusted_authors_only"`
 	LocalPath          *string `json:"local_path"`
 	SocketEnabled      *bool   `json:"socket_enabled"`
+	QueueEnabled       *bool   `json:"queue_enabled"`
 }
 
 func (d *Daemon) updateRepo(w http.ResponseWriter, r *http.Request) {
@@ -890,23 +897,32 @@ func (d *Daemon) updateRepo(w http.ResponseWriter, r *http.Request) {
 		repo.SocketEnabled = *req.SocketEnabled
 	}
 
+	oldQueueEnabled := repo.QueueEnabled
+	if req.QueueEnabled != nil {
+		repo.QueueEnabled = *req.QueueEnabled
+	}
+
 	if err := d.store.UpdateRepo(r.Context(), repo); err != nil {
 		writeError(w, http.StatusInternalServerError, "update repo: "+err.Error())
 		return
 	}
 
-	// Toggle socket and file queue on/off as needed.
+	// Toggle socket on/off as needed.
 	if repo.SocketEnabled && repo.LocalPath != "" && !oldSocketEnabled {
 		if err := d.CreateSocketForRepo(repo); err != nil {
 			slog.Warn("could not create socket for repo", "repo", repo.FullName(), "error", err)
 		}
+	} else if !repo.SocketEnabled && oldSocketEnabled && repo.LocalPath != "" {
+		sockPath := filepath.Join(repo.LocalPath, ".boxofrocks", "bor.sock")
+		d.removeSocket(sockPath)
+	}
+
+	// Toggle file queue on/off as needed.
+	if repo.QueueEnabled && repo.LocalPath != "" && !oldQueueEnabled {
 		if err := d.startFileQueue(repo); err != nil {
 			slog.Warn("could not start file queue", "repo", repo.FullName(), "error", err)
 		}
-	} else if !repo.SocketEnabled && oldSocketEnabled && repo.LocalPath != "" {
-		// Compute the socket path manually since SocketEnabled is now false.
-		sockPath := filepath.Join(repo.LocalPath, ".boxofrocks", "bor.sock")
-		d.removeSocket(sockPath)
+	} else if !repo.QueueEnabled && oldQueueEnabled && repo.LocalPath != "" {
 		queueDir := filepath.Join(repo.LocalPath, ".boxofrocks", "queue")
 		d.stopFileQueue(queueDir)
 	}
