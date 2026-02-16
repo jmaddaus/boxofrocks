@@ -41,7 +41,7 @@ bor init (—json for full sandbox, —socket if you need it)
 
 ### Success!
 * arbiter.yml will pull binary/checksum to run GH Actions to adjudicate conflicts between updates in issues
-* issues created by (approved) humans in GH will be pulled down and tagged/updated by next agent to sync issue into tracker 
+* issues created by (approved) humans in GH will need to have label boxofrocks added to the issue to get flagged for inclusion into work chain
 
 ### (Optional) In Web Browser
 Visit localhost:8042 for basic UI to see local issues info
