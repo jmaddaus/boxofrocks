@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # CLAUDE.md - Box of Rocks (`bor`)
 
 ## Project Overview
@@ -40,17 +42,17 @@ model ← (used by all packages)
 
 ### Package Responsibilities
 
-| Package | Role | Has tests |
-|---------|------|-----------|
-| `internal/model` | Data types: Issue, Event, RepoConfig, LocalPathConfig, constants | No |
-| `internal/store` | `Store` interface + SQLite implementation | Yes (39) |
-| `internal/engine` | Pure-logic event replay (`Replay`, `Apply`) | Yes (21) |
-| `internal/github` | GitHub REST API client, auth, body/comment parser, `IsTrustedAuthor` | Yes (37) |
-| `internal/sync` | `SyncManager` + per-repo `RepoSyncer` goroutines, trusted-author filtering | Yes (17) |
-| `internal/daemon` | HTTP server, routes, handlers, middleware, Unix socket lifecycle | Yes (29) |
-| `internal/cli` | CLI commands, HTTP client to daemon, output formatting | No |
-| `internal/config` | `~/.boxofrocks/config.json` management | No |
-| `arbiter/cmd/reconcile` | Standalone binary for GitHub Action | No |
+| Package                 | Role                                                                       | Has tests |
+| ----------------------- | -------------------------------------------------------------------------- | --------- |
+| `internal/model`        | Data types: Issue, Event, RepoConfig, LocalPathConfig, constants           | No        |
+| `internal/store`        | `Store` interface + SQLite implementation                                  | Yes (39)  |
+| `internal/engine`       | Pure-logic event replay (`Replay`, `Apply`)                                | Yes (21)  |
+| `internal/github`       | GitHub REST API client, auth, body/comment parser, `IsTrustedAuthor`       | Yes (37)  |
+| `internal/sync`         | `SyncManager` + per-repo `RepoSyncer` goroutines, trusted-author filtering | Yes (17)  |
+| `internal/daemon`       | HTTP server, routes, handlers, middleware, Unix socket lifecycle           | Yes (29)  |
+| `internal/cli`          | CLI commands, HTTP client to daemon, output formatting                     | No        |
+| `internal/config`       | `~/.boxofrocks/config.json` management                                     | No        |
+| `arbiter/cmd/reconcile` | Standalone binary for GitHub Action                                        | No        |
 
 ## Key Design Patterns
 
@@ -63,6 +65,7 @@ Every mutation (create, update, close, assign, delete) appends an `Event` to the
 ### Handler Pattern (daemon/handlers.go)
 
 All issue-mutation handlers follow this pattern:
+
 1. Resolve repo (query param → X-Repo header → implicit single repo)
 2. Validate input
 3. Generate event with `synced=0`
@@ -82,6 +85,7 @@ Stale/skipped events are silently ignored during replay (not errors). This is in
 ### Sync Flow (sync/syncer.go)
 
 Each `RepoSyncer` poll cycle:
+
 1. **Push outbound:** query `PendingEvents(synced=0)`, post as GitHub comments, mark synced
 2. **Pull inbound:** list GitHub issues with `boxofrocks` label, fetch new comments since `last_comment_id`, filter by `author_association` if `TrustedAuthorsOnly` is enabled, apply incrementally
 3. **Web-created issues:** GitHub issues with `boxofrocks` label but no local match get a synthetic `create` event
@@ -89,6 +93,7 @@ Each `RepoSyncer` poll cycle:
 **Trusted author filtering:** When `RepoConfig.TrustedAuthorsOnly` is true, inbound comments are filtered by `github.IsTrustedAuthor(c.AuthorAssociation)` before processing (both incremental and full replay paths). Trusted associations: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR. Auto-enabled for public repos during `bor init`. The arbiter applies the same filter by checking repo visibility via `GetRepo`.
 
 **Adaptive polling:** Each syncer tracks a `lastActivityAt` timestamp. If a cycle pushes outbound events or receives inbound changes, `lastActivityAt` is reset. Polling uses two tiers:
+
 - **Fast** (5s base, scaled by repo count): used when `lastActivityAt` is within 2 minutes
 - **Slow** (60s): used when idle longer than 2 minutes
 
@@ -151,8 +156,13 @@ Force sync always resets to fast tier. The `SyncStatus.Idle` field reports wheth
 ## Configuration
 
 Default config at `~/.boxofrocks/config.json`:
+
 ```json
-{"listen_addr": ":8042", "data_dir": "~/.boxofrocks", "db_path": "~/.boxofrocks/bor.db"}
+{
+	"listen_addr": ":8042",
+	"data_dir": "~/.boxofrocks",
+	"db_path": "~/.boxofrocks/bor.db"
+}
 ```
 
 `TRACKER_HOST` env var overrides the daemon URL (default `http://127.0.0.1:8042`). Used for Docker containers pointing at `host.docker.internal`.
@@ -162,6 +172,7 @@ Default config at `~/.boxofrocks/config.json`:
 `bor init --socket` registers the working directory as a local path for the repo and enables a Unix domain socket at `.boxofrocks/bor.sock`. Each repo supports multiple local paths (e.g., git worktrees), each with independent socket and file queue. Re-running `bor init` from a different worktree adds a path rather than overwriting.
 
 **Repo resolution chain** (`resolveRepo` in `daemon/handlers.go`):
+
 1. `?repo=` query param
 2. `X-Repo` header
 3. Socket association — `ConnContext` injects repo ID for Unix socket connections
@@ -169,10 +180,12 @@ Default config at `~/.boxofrocks/config.json`:
 5. Single-repo implicit fallback
 
 **Local path management** (`POST /repos/paths`, `DELETE /repos/paths`):
+
 - Paths stored in `repo_local_paths` table (schema v5), globally unique per directory
 - Upserts on conflict — safe to call repeatedly from the same directory
 
 **Socket lifecycle** (in `daemon/daemon.go`):
+
 - `createSocketAtPath(repoID, sockPath)` — creates dir, removes stale socket, listens, serves
 - `startRepoSockets()` — on startup, iterates all `repo.LocalPaths` with `SocketEnabled=true`
 - `socketRepos map[string]int` — maps socket path to repo ID for `ConnContext` lookup
@@ -180,3 +193,42 @@ Default config at `~/.boxofrocks/config.json`:
 ## Auth Chain
 
 Token resolution order: `GITHUB_TOKEN` env → `gh auth token` → `git credential fill`. Daemon starts without a token (sync disabled, local-only mode).
+
+# Task Management (bor)
+
+This project uses `bor` for issue tracking via a file-based queue.
+
+**Setup** — source the helper at the start of your session:
+
+```bash
+source .boxofrocks/bor_api.sh
+```
+
+Before starting work, check for a queued issue:
+
+```bash
+bor_api GET /issues/next
+bor_api POST /issues/<id>/assign '{"owner":"{{AGENT_NAME}}"}'
+bor_api PATCH /issues/<id> '{"status":"in_progress","comment":"starting: brief plan"}'
+
+# At milestones — comment on progress
+bor_api POST /issues/<id>/comment '{"comment":"implemented X, moving to Y"}'
+
+# If blocked
+bor_api PATCH /issues/<id> '{"status":"blocked","comment":"reason"}'
+
+# When ready for review
+bor_api PATCH /issues/<id> '{"status":"in_review","comment":"summary of changes"}'
+
+# When done
+bor_api PATCH /issues/<id> '{"status":"closed","comment":"what was done"}'
+```
+
+If `bor_api` returns a timeout, the daemon may not be running. If next-issue returns 404, proceed with the user's direct request. Do not create issues unless explicitly asked.
+
+Reference:
+
+- List by status: `bor_api GET '/issues?status=open'`
+- Create issue: `bor_api POST /issues '{"title":"..."}'`
+
+Responses: `{"status":<http_code>,"body":<response>}`. Statuses: `open` `in_progress` `blocked` `in_review` `closed`. Types: `task` `bug` `feature` `epic`. Priority: integer, lower = higher.
