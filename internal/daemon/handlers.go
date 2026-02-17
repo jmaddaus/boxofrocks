@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -35,6 +36,7 @@ func readJSON(r *http.Request, v interface{}) error {
 		return fmt.Errorf("empty request body")
 	}
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(nil, r.Body, 1<<20) // 1 MB
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
@@ -47,6 +49,23 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+func parseIssueID(r *http.Request) (int, error) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		return 0, fmt.Errorf("invalid issue id")
+	}
+	return id, nil
+}
+
+// lookupRepo parses an "owner/name" string and looks up the repo.
+func (d *Daemon) lookupRepo(ctx context.Context, ownerSlashName string) (*model.RepoConfig, error) {
+	parts := strings.SplitN(ownerSlashName, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("invalid repo format, use owner/name")
+	}
+	return d.store.GetRepoByName(ctx, parts[0], parts[1])
+}
+
 // ---------------------------------------------------------------------------
 // Repo resolution
 // ---------------------------------------------------------------------------
@@ -57,13 +76,8 @@ func (d *Daemon) resolveRepo(r *http.Request) (*model.RepoConfig, error) {
 	ctx := r.Context()
 
 	// 1. Query param.
-	repoParam := r.URL.Query().Get("repo")
-	if repoParam != "" {
-		parts := strings.SplitN(repoParam, "/", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return nil, fmt.Errorf("invalid repo format, use owner/name")
-		}
-		repo, err := d.store.GetRepoByName(ctx, parts[0], parts[1])
+	if repoParam := r.URL.Query().Get("repo"); repoParam != "" {
+		repo, err := d.lookupRepo(ctx, repoParam)
 		if err != nil {
 			return nil, fmt.Errorf("repo %s not found", repoParam)
 		}
@@ -71,13 +85,8 @@ func (d *Daemon) resolveRepo(r *http.Request) (*model.RepoConfig, error) {
 	}
 
 	// 2. X-Repo header.
-	repoHeader := r.Header.Get("X-Repo")
-	if repoHeader != "" {
-		parts := strings.SplitN(repoHeader, "/", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return nil, fmt.Errorf("invalid X-Repo format, use owner/name")
-		}
-		repo, err := d.store.GetRepoByName(ctx, parts[0], parts[1])
+	if repoHeader := r.Header.Get("X-Repo"); repoHeader != "" {
+		repo, err := d.lookupRepo(ctx, repoHeader)
 		if err != nil {
 			return nil, fmt.Errorf("repo %s not found", repoHeader)
 		}
@@ -381,10 +390,9 @@ func (d *Daemon) nextIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) getIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -467,7 +475,11 @@ func (d *Daemon) createIssue(w http.ResponseWriter, r *http.Request) {
 		Labels:      req.Labels,
 		Comment:     req.Comment,
 	}
-	payloadJSON, _ := json.Marshal(payload)
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+		return
+	}
 
 	event := &model.Event{
 		RepoID:    repo.ID,
@@ -497,10 +509,9 @@ type updateIssueRequest struct {
 }
 
 func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -541,7 +552,11 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 			FromStatus: issue.Status,
 			Comment:    req.Comment,
 		}
-		payloadJSON, _ := json.Marshal(payload)
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+			return
+		}
 
 		event := &model.Event{
 			RepoID:    issue.RepoID,
@@ -582,7 +597,11 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 			Labels:      req.Labels,
 			Comment:     comment,
 		}
-		payloadJSON, _ := json.Marshal(payload)
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+			return
+		}
 
 		event := &model.Event{
 			RepoID:    issue.RepoID,
@@ -611,7 +630,11 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 		payload := model.EventPayload{
 			Comment: req.Comment,
 		}
-		payloadJSON, _ := json.Marshal(payload)
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+			return
+		}
 
 		event := &model.Event{
 			RepoID:    issue.RepoID,
@@ -651,10 +674,9 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) deleteIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -675,7 +697,11 @@ func (d *Daemon) deleteIssue(w http.ResponseWriter, r *http.Request) {
 	deletePayload := model.EventPayload{
 		FromStatus: issue.Status,
 	}
-	deletePayloadJSON, _ := json.Marshal(deletePayload)
+	deletePayloadJSON, err := json.Marshal(deletePayload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+		return
+	}
 
 	event := &model.Event{
 		RepoID:    issue.RepoID,
@@ -712,10 +738,9 @@ type assignIssueRequest struct {
 }
 
 func (d *Daemon) assignIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -742,7 +767,11 @@ func (d *Daemon) assignIssue(w http.ResponseWriter, r *http.Request) {
 	payload := model.EventPayload{
 		Owner: req.Owner,
 	}
-	payloadJSON, _ := json.Marshal(payload)
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+		return
+	}
 
 	event := &model.Event{
 		RepoID:    issue.RepoID,
@@ -789,10 +818,9 @@ type commentIssueRequest struct {
 }
 
 func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -822,7 +850,11 @@ func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
 	payload := model.EventPayload{
 		Comment: req.Comment,
 	}
-	payloadJSON, _ := json.Marshal(payload)
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+		return
+	}
 
 	event := &model.Event{
 		RepoID:    issue.RepoID,

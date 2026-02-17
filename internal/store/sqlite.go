@@ -105,7 +105,7 @@ func (s *SQLiteStore) ListRepos(ctx context.Context) ([]*model.RepoConfig, error
 
 	var repos []*model.RepoConfig
 	for rows.Next() {
-		r, err := scanRepoRow(rows)
+		r, err := scanRepo(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -158,20 +158,11 @@ func (s *SQLiteStore) loadLocalPaths(ctx context.Context, repo *model.RepoConfig
 }
 
 func (s *SQLiteStore) AddLocalPath(ctx context.Context, repoID int, localPath string, socket, queue bool) (*model.LocalPathConfig, error) {
-	socketInt := 0
-	if socket {
-		socketInt = 1
-	}
-	queueInt := 0
-	if queue {
-		queueInt = 1
-	}
-
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO repo_local_paths (repo_id, local_path, socket_enabled, queue_enabled)
 		 VALUES (?, ?, ?, ?)
 		 ON CONFLICT(local_path) DO UPDATE SET socket_enabled=excluded.socket_enabled, queue_enabled=excluded.queue_enabled`,
-		repoID, localPath, socketInt, queueInt)
+		repoID, localPath, boolToInt(socket), boolToInt(queue))
 	if err != nil {
 		return nil, err
 	}
@@ -225,22 +216,10 @@ func (s *SQLiteStore) UpdateRepo(ctx context.Context, repo *model.RepoConfig) er
 		t := repo.LastSyncAt.Format(time.RFC3339)
 		lastSync = &t
 	}
-	trustedInt := 0
-	if repo.TrustedAuthorsOnly {
-		trustedInt = 1
-	}
-	socketInt := 0
-	if repo.SocketEnabled {
-		socketInt = 1
-	}
-	queueInt := 0
-	if repo.QueueEnabled {
-		queueInt = 1
-	}
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE repos SET owner=?, name=?, poll_interval_ms=?, last_sync_at=?, issues_etag=?, issues_since=?, trusted_authors_only=?, local_path=?, socket_enabled=?, queue_enabled=?
 		 WHERE id=?`,
-		repo.Owner, repo.Name, repo.PollIntervalMs, lastSync, repo.IssuesETag, repo.IssuesSince, trustedInt, repo.LocalPath, socketInt, queueInt, repo.ID)
+		repo.Owner, repo.Name, repo.PollIntervalMs, lastSync, repo.IssuesETag, repo.IssuesSince, boolToInt(repo.TrustedAuthorsOnly), repo.LocalPath, boolToInt(repo.SocketEnabled), boolToInt(repo.QueueEnabled), repo.ID)
 	return err
 }
 
@@ -345,7 +324,7 @@ func (s *SQLiteStore) ListIssues(ctx context.Context, filter IssueFilter) ([]*mo
 
 	var issues []*model.Issue
 	for rows.Next() {
-		iss, err := scanIssueRow(rows)
+		iss, err := scanIssue(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -459,7 +438,7 @@ func (s *SQLiteStore) ListEvents(ctx context.Context, repoID, issueID int) ([]*m
 
 	var events []*model.Event
 	for rows.Next() {
-		e, err := scanEventRow(rows)
+		e, err := scanEvent(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -480,7 +459,7 @@ func (s *SQLiteStore) PendingEvents(ctx context.Context, repoID int) ([]*model.E
 
 	var events []*model.Event
 	for rows.Next() {
-		e, err := scanEventRow(rows)
+		e, err := scanEvent(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -527,6 +506,17 @@ func (s *SQLiteStore) SetIssueSyncState(ctx context.Context, repoID, githubIssue
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
 // Scan helpers
 // ---------------------------------------------------------------------------
 
@@ -563,10 +553,6 @@ func scanRepo(row scanner) (*model.RepoConfig, error) {
 		}
 	}
 	return &r, nil
-}
-
-func scanRepoRow(rows *sql.Rows) (*model.RepoConfig, error) {
-	return scanRepo(rows)
 }
 
 func scanIssue(row scanner) (*model.Issue, error) {
@@ -606,10 +592,6 @@ func scanIssue(row scanner) (*model.Issue, error) {
 	return &iss, nil
 }
 
-func scanIssueRow(rows *sql.Rows) (*model.Issue, error) {
-	return scanIssue(rows)
-}
-
 func scanEvent(row scanner) (*model.Event, error) {
 	var e model.Event
 	var githubCommentID sql.NullInt64
@@ -634,6 +616,3 @@ func scanEvent(row scanner) (*model.Event, error) {
 	return &e, nil
 }
 
-func scanEventRow(rows *sql.Rows) (*model.Event, error) {
-	return scanEvent(rows)
-}

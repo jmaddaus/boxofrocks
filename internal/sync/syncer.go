@@ -317,8 +317,9 @@ func (rs *RepoSyncer) cycle(full bool) {
 		if err := rs.ghClient.CreateLabel(ctx, rs.repo.Owner, rs.repo.Name,
 			"boxofrocks", "6f42c1", "Tracked by boxofrocks"); err != nil {
 			slog.Warn("failed to ensure boxofrocks label", "repo", rs.repo.FullName(), "error", err)
+		} else {
+			rs.labelEnsured = true
 		}
-		rs.labelEnsured = true
 	}
 
 	// Push outbound events first.

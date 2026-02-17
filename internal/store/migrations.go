@@ -182,6 +182,14 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	// Replace single-column index with composite index for the actual query pattern.
+	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_events_synced`); err != nil {
+		return fmt.Errorf("drop idx_events_synced: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_repo_synced ON events(repo_id, synced)`); err != nil {
+		return fmt.Errorf("create idx_events_repo_synced: %w", err)
+	}
+
 	// Version 5: repo_local_paths junction table for multiple worktrees per repo.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS repo_local_paths (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
