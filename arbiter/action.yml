@@ -11,10 +11,9 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
       run: |
-        gh release download --repo "$GH_REPO" --pattern "reconcile-linux-amd64" --dir /tmp
-        gh release download --repo "$GH_REPO" --pattern "checksums.txt" --dir /tmp
+        gh release download --repo jmaddaus/boxofrocks --pattern "reconcile-linux-amd64" --dir /tmp
+        gh release download --repo jmaddaus/boxofrocks --pattern "checksums.txt" --dir /tmp
         cd /tmp && grep reconcile-linux-amd64 checksums.txt | sha256sum --check
         mv /tmp/reconcile-linux-amd64 /tmp/reconcile
         chmod +x /tmp/reconcile
