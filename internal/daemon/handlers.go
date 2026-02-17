@@ -67,6 +67,18 @@ func (d *Daemon) lookupRepo(ctx context.Context, ownerSlashName string) (*model.
 	return d.store.GetRepoByName(ctx, parts[0], parts[1])
 }
 
+// triggerSync kicks off an async sync cycle for the given repo so that
+// freshly-created outbound events are pushed without waiting for the next
+// poll interval. Errors are logged but not propagated to the caller.
+func (d *Daemon) triggerSync(repoID int) {
+	if d.syncMgr == nil {
+		return
+	}
+	if err := d.syncMgr.ForceSync(repoID); err != nil {
+		slog.Debug("could not trigger immediate sync", "repo_id", repoID, "error", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Repo resolution
 // ---------------------------------------------------------------------------
@@ -422,7 +434,7 @@ func (d *Daemon) listIssues(w http.ResponseWriter, r *http.Request) {
 	if !showAll && filter.Status == "" {
 		filtered := make([]*model.Issue, 0, len(issues))
 		for _, iss := range issues {
-			if iss.Status != model.StatusDeleted {
+			if iss.Status != model.StatusDeleted && iss.Status != model.StatusClosed {
 				filtered = append(filtered, iss)
 			}
 		}
@@ -562,6 +574,7 @@ func (d *Daemon) createIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(repo.ID)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -737,6 +750,7 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(issue.RepoID)
 	writeJSON(w, http.StatusOK, issue)
 }
 
@@ -797,6 +811,7 @@ func (d *Daemon) deleteIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(issue.RepoID)
 	writeJSON(w, http.StatusOK, issue)
 }
 
@@ -873,6 +888,7 @@ func (d *Daemon) assignIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(issue.RepoID)
 	writeJSON(w, http.StatusOK, issue)
 }
 
@@ -955,6 +971,7 @@ func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(issue.RepoID)
 	writeJSON(w, http.StatusCreated, issue)
 }
 

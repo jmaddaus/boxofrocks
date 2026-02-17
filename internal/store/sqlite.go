@@ -615,4 +615,3 @@ func scanEvent(row scanner) (*model.Event, error) {
 	e.Timestamp, _ = time.Parse(time.RFC3339, ts)
 	return &e, nil
 }
-
