@@ -223,6 +223,21 @@ func (m *mockGitHubClient) UpdateIssueState(ctx context.Context, owner, repo str
 	return fmt.Errorf("issue %d not found", number)
 }
 
+func (m *mockGitHubClient) AddLabelsToIssue(ctx context.Context, owner, repo string, number int, labels []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := m.repoKey(owner, repo)
+	for i, iss := range m.issues[key] {
+		if iss.Number == number {
+			for _, label := range labels {
+				m.issues[key][i].Labels = append(m.issues[key][i].Labels, github.GitHubLabel{Name: label})
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("issue %d not found", number)
+}
+
 func (m *mockGitHubClient) GetRepo(ctx context.Context, owner, repo string) (*github.GitHubRepo, error) {
 	return &github.GitHubRepo{Private: true}, nil
 }

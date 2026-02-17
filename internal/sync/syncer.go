@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -317,8 +318,9 @@ func (rs *RepoSyncer) cycle(full bool) {
 		if err := rs.ghClient.CreateLabel(ctx, rs.repo.Owner, rs.repo.Name,
 			"boxofrocks", "6f42c1", "Tracked by boxofrocks"); err != nil {
 			slog.Warn("failed to ensure boxofrocks label", "repo", rs.repo.FullName(), "error", err)
+		} else {
+			rs.labelEnsured = true
 		}
-		rs.labelEnsured = true
 	}
 
 	// Push outbound events first.
@@ -609,6 +611,19 @@ func (rs *RepoSyncer) processGitHubIssue(ctx context.Context, ghIssue *github.Gi
 		}
 	}
 
+	// Reconcile GitHub issue state with local state.
+	// If someone closed/reopened an issue via GitHub's UI (no boxofrocks comment),
+	// we need to detect the state divergence and generate a synthetic event.
+	if full {
+		// After full replay the DB was updated directly; re-read the local issue.
+		if refreshed, err := rs.store.GetIssue(ctx, localIssue.ID); err == nil {
+			localIssue = refreshed
+		}
+	}
+	if err := rs.reconcileGitHubState(ctx, localIssue, ghIssue); err != nil {
+		return fmt.Errorf("reconcile state: %w", err)
+	}
+
 	// Update the sync state with the latest comment.
 	if len(comments) > 0 {
 		last := comments[len(comments)-1]
@@ -619,6 +634,83 @@ func (rs *RepoSyncer) processGitHubIssue(ctx context.Context, ghIssue *github.Gi
 		if err := rs.store.SetIssueSyncState(ctx, rs.repo.ID, ghIssue.Number, lastCommentID, lastCommentAt); err != nil {
 			return fmt.Errorf("set sync state: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// reconcileGitHubState detects when the GitHub issue state (open/closed) diverges
+// from the local issue status and generates a synthetic close or reopen event.
+// This handles cases where someone closes/reopens an issue via GitHub's UI
+// without a [boxofrocks] comment.
+func (rs *RepoSyncer) reconcileGitHubState(ctx context.Context, localIssue *model.Issue, ghIssue *github.GitHubIssue) error {
+	if engine.IsTerminal(localIssue.Status) {
+		return nil // deleted issues are never reconciled
+	}
+
+	now := time.Now().UTC()
+	ghIssueNum := ghIssue.Number
+
+	switch {
+	case ghIssue.State == "closed" && localIssue.Status != model.StatusClosed:
+		// GitHub is closed but local is not — generate a synthetic close event.
+		payload := model.EventPayload{
+			FromStatus: localIssue.Status,
+		}
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal close payload: %w", err)
+		}
+
+		ev := &model.Event{
+			RepoID:            rs.repo.ID,
+			IssueID:           localIssue.ID,
+			GitHubIssueNumber: &ghIssueNum,
+			Timestamp:         now,
+			Action:            model.ActionClose,
+			Payload:           string(payloadJSON),
+			Synced:            1, // originated from GitHub
+		}
+
+		updated, err := engine.Apply(localIssue, ev)
+		if err != nil {
+			return fmt.Errorf("apply close: %w", err)
+		}
+
+		if err := rs.store.UpdateIssue(ctx, updated); err != nil {
+			return fmt.Errorf("update issue: %w", err)
+		}
+		if _, err := rs.store.AppendEvent(ctx, ev); err != nil {
+			return fmt.Errorf("append close event: %w", err)
+		}
+
+		slog.Info("reconciled GitHub close", "repo", rs.repo.FullName(), "issue", localIssue.ID, "github_number", ghIssue.Number)
+
+	case ghIssue.State == "open" && localIssue.Status == model.StatusClosed:
+		// GitHub is open but local is closed — generate a synthetic reopen event.
+		ev := &model.Event{
+			RepoID:            rs.repo.ID,
+			IssueID:           localIssue.ID,
+			GitHubIssueNumber: &ghIssueNum,
+			Timestamp:         now,
+			Action:            model.ActionReopen,
+			Payload:           "{}",
+			Synced:            1,
+		}
+
+		updated, err := engine.Apply(localIssue, ev)
+		if err != nil {
+			return fmt.Errorf("apply reopen: %w", err)
+		}
+
+		if err := rs.store.UpdateIssue(ctx, updated); err != nil {
+			return fmt.Errorf("update issue: %w", err)
+		}
+		if _, err := rs.store.AppendEvent(ctx, ev); err != nil {
+			return fmt.Errorf("append reopen event: %w", err)
+		}
+
+		slog.Info("reconciled GitHub reopen", "repo", rs.repo.FullName(), "issue", localIssue.ID, "github_number", ghIssue.Number)
 	}
 
 	return nil

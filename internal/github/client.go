@@ -56,6 +56,7 @@ type ListOpts struct {
 	Since   string
 	PerPage int
 	Labels  string // comma-separated label filter
+	State   string // issue state filter: "open", "closed", or "all" (default: "all")
 }
 
 // RateLimit holds the current rate limit status from GitHub API.
@@ -74,6 +75,7 @@ type Client interface {
 	UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error
 	ListComments(ctx context.Context, owner, repo string, number int, opts ListOpts) ([]*GitHubComment, string, error)
 	CreateComment(ctx context.Context, owner, repo string, number int, body string) (*GitHubComment, error)
+	AddLabelsToIssue(ctx context.Context, owner, repo string, number int, labels []string) error
 	CreateLabel(ctx context.Context, owner, repo, name, color, description string) error
 	GetRateLimit() RateLimit
 }
@@ -192,7 +194,11 @@ func (c *clientImpl) ListIssues(ctx context.Context, owner, repo string, opts Li
 		perPage = 100
 	}
 
-	url := fmt.Sprintf("%s/repos/%s/%s/issues?per_page=%d&state=all", c.baseURL, owner, repo, perPage)
+	state := opts.State
+	if state == "" {
+		state = "all"
+	}
+	url := fmt.Sprintf("%s/repos/%s/%s/issues?per_page=%d&state=%s", c.baseURL, owner, repo, perPage, state)
 	if opts.Since != "" {
 		url += "&since=" + opts.Since
 	}
@@ -509,6 +515,34 @@ func (c *clientImpl) CreateComment(ctx context.Context, owner, repo string, numb
 	}
 
 	return &comment, nil
+}
+
+// AddLabelsToIssue adds labels to an existing issue.
+func (c *clientImpl) AddLabelsToIssue(ctx context.Context, owner, repo string, number int, labels []string) error {
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels", c.baseURL, owner, repo, number)
+
+	payload := map[string][]string{
+		"labels": labels,
+	}
+
+	req, err := c.newRequest(ctx, http.MethodPost, url, payload)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.do(req)
+	if err != nil {
+		return fmt.Errorf("add labels to issue: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("add labels to issue: unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 // CreateLabel creates a label in the specified repository.

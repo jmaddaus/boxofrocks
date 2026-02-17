@@ -621,6 +621,9 @@ func (noopGitHubClient) ListComments(ctx context.Context, owner, repo string, nu
 func (noopGitHubClient) CreateComment(ctx context.Context, owner, repo string, number int, body string) (*github.GitHubComment, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+func (noopGitHubClient) AddLabelsToIssue(ctx context.Context, owner, repo string, number int, labels []string) error {
+	return nil
+}
 func (noopGitHubClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
 	return nil
 }

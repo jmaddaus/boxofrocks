@@ -266,7 +266,7 @@ func (d *Daemon) writeQueueResponse(reqPath string, status int, body interface{}
 		return
 	}
 
-	if err := os.WriteFile(tmpPath, respData, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, respData, 0600); err != nil {
 		slog.Warn("file queue write tmp error", "path", tmpPath, "error", err)
 		return
 	}

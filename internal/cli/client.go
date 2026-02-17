@@ -344,3 +344,41 @@ func (c *Client) ForceSync(repo string) error {
 	}
 	return decodeOrError(resp, nil)
 }
+
+// ImportIssues labels all open GitHub issues with "boxofrocks" and triggers a sync.
+func (c *Client) ImportIssues(repo string) (*ImportResult, error) {
+	path := "/repos/import"
+	if repo != "" {
+		path += "?repo=" + repo
+	}
+	resp, err := c.Do("POST", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result ImportResult
+	if err := decodeOrError(resp, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ImportResult holds the response from the import endpoint.
+type ImportResult struct {
+	Status  string `json:"status"`
+	Repo    string `json:"repo"`
+	Labeled int    `json:"labeled"`
+	Total   int    `json:"total"`
+}
+
+// ForceSyncFull triggers a full replay sync for the given repo.
+func (c *Client) ForceSyncFull(repo string) error {
+	path := "/sync?full=true"
+	if repo != "" {
+		path += "&repo=" + repo
+	}
+	resp, err := c.Do("POST", path, nil)
+	if err != nil {
+		return err
+	}
+	return decodeOrError(resp, nil)
+}

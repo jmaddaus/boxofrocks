@@ -121,7 +121,7 @@ func runDaemonBackground(gf globalFlags) error {
 	}
 
 	logPath := daemon.LogFilePath(cfg)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
 	}

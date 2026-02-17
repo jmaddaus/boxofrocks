@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jmaddaus/boxofrocks/internal/engine"
+	"github.com/jmaddaus/boxofrocks/internal/github"
 	"github.com/jmaddaus/boxofrocks/internal/model"
 	"github.com/jmaddaus/boxofrocks/internal/store"
 )
@@ -35,6 +37,7 @@ func readJSON(r *http.Request, v interface{}) error {
 		return fmt.Errorf("empty request body")
 	}
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(nil, r.Body, 1<<20) // 1 MB
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
@@ -47,6 +50,35 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+func parseIssueID(r *http.Request) (int, error) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		return 0, fmt.Errorf("invalid issue id")
+	}
+	return id, nil
+}
+
+// lookupRepo parses an "owner/name" string and looks up the repo.
+func (d *Daemon) lookupRepo(ctx context.Context, ownerSlashName string) (*model.RepoConfig, error) {
+	parts := strings.SplitN(ownerSlashName, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("invalid repo format, use owner/name")
+	}
+	return d.store.GetRepoByName(ctx, parts[0], parts[1])
+}
+
+// triggerSync kicks off an async sync cycle for the given repo so that
+// freshly-created outbound events are pushed without waiting for the next
+// poll interval. Errors are logged but not propagated to the caller.
+func (d *Daemon) triggerSync(repoID int) {
+	if d.syncMgr == nil {
+		return
+	}
+	if err := d.syncMgr.ForceSync(repoID); err != nil {
+		slog.Debug("could not trigger immediate sync", "repo_id", repoID, "error", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Repo resolution
 // ---------------------------------------------------------------------------
@@ -57,13 +89,8 @@ func (d *Daemon) resolveRepo(r *http.Request) (*model.RepoConfig, error) {
 	ctx := r.Context()
 
 	// 1. Query param.
-	repoParam := r.URL.Query().Get("repo")
-	if repoParam != "" {
-		parts := strings.SplitN(repoParam, "/", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return nil, fmt.Errorf("invalid repo format, use owner/name")
-		}
-		repo, err := d.store.GetRepoByName(ctx, parts[0], parts[1])
+	if repoParam := r.URL.Query().Get("repo"); repoParam != "" {
+		repo, err := d.lookupRepo(ctx, repoParam)
 		if err != nil {
 			return nil, fmt.Errorf("repo %s not found", repoParam)
 		}
@@ -71,13 +98,8 @@ func (d *Daemon) resolveRepo(r *http.Request) (*model.RepoConfig, error) {
 	}
 
 	// 2. X-Repo header.
-	repoHeader := r.Header.Get("X-Repo")
-	if repoHeader != "" {
-		parts := strings.SplitN(repoHeader, "/", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return nil, fmt.Errorf("invalid X-Repo format, use owner/name")
-		}
-		repo, err := d.store.GetRepoByName(ctx, parts[0], parts[1])
+	if repoHeader := r.Header.Get("X-Repo"); repoHeader != "" {
+		repo, err := d.lookupRepo(ctx, repoHeader)
 		if err != nil {
 			return nil, fmt.Errorf("repo %s not found", repoHeader)
 		}
@@ -203,7 +225,13 @@ func (d *Daemon) forceSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := d.syncMgr.ForceSync(repo.ID); err != nil {
+	full := r.URL.Query().Get("full") == "true"
+	if full {
+		err = d.syncMgr.ForceSyncFull(repo.ID)
+	} else {
+		err = d.syncMgr.ForceSync(repo.ID)
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -211,6 +239,66 @@ func (d *Daemon) forceSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "sync triggered",
 		"repo":   repo.FullName(),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Import all issues
+// ---------------------------------------------------------------------------
+
+func (d *Daemon) importIssues(w http.ResponseWriter, r *http.Request) {
+	if d.ghClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "GitHub client not configured; authenticate first")
+		return
+	}
+
+	repo, err := d.resolveRepo(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx := r.Context()
+
+	// List all open issues (no label filter).
+	ghIssues, _, err := d.ghClient.ListIssues(ctx, repo.Owner, repo.Name, github.ListOpts{
+		State: "open",
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list GitHub issues: "+err.Error())
+		return
+	}
+
+	labeled := 0
+	for _, issue := range ghIssues {
+		hasLabel := false
+		for _, lbl := range issue.Labels {
+			if lbl.Name == "boxofrocks" {
+				hasLabel = true
+				break
+			}
+		}
+		if !hasLabel {
+			if err := d.ghClient.AddLabelsToIssue(ctx, repo.Owner, repo.Name, issue.Number, []string{"boxofrocks"}); err != nil {
+				slog.Warn("could not label issue", "number", issue.Number, "error", err)
+				continue
+			}
+			labeled++
+		}
+	}
+
+	// Trigger sync so the newly-labeled issues get pulled in.
+	if d.syncMgr != nil {
+		if err := d.syncMgr.ForceSync(repo.ID); err != nil {
+			slog.Warn("could not trigger sync after import", "repo", repo.FullName(), "error", err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "import complete",
+		"repo":    repo.FullName(),
+		"labeled": labeled,
+		"total":   len(ghIssues),
 	})
 }
 
@@ -346,7 +434,7 @@ func (d *Daemon) listIssues(w http.ResponseWriter, r *http.Request) {
 	if !showAll && filter.Status == "" {
 		filtered := make([]*model.Issue, 0, len(issues))
 		for _, iss := range issues {
-			if iss.Status != model.StatusDeleted {
+			if iss.Status != model.StatusDeleted && iss.Status != model.StatusClosed {
 				filtered = append(filtered, iss)
 			}
 		}
@@ -381,10 +469,9 @@ func (d *Daemon) nextIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) getIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -467,7 +554,11 @@ func (d *Daemon) createIssue(w http.ResponseWriter, r *http.Request) {
 		Labels:      req.Labels,
 		Comment:     req.Comment,
 	}
-	payloadJSON, _ := json.Marshal(payload)
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+		return
+	}
 
 	event := &model.Event{
 		RepoID:    repo.ID,
@@ -483,6 +574,7 @@ func (d *Daemon) createIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(repo.ID)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -497,10 +589,9 @@ type updateIssueRequest struct {
 }
 
 func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -541,7 +632,11 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 			FromStatus: issue.Status,
 			Comment:    req.Comment,
 		}
-		payloadJSON, _ := json.Marshal(payload)
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+			return
+		}
 
 		event := &model.Event{
 			RepoID:    issue.RepoID,
@@ -582,7 +677,11 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 			Labels:      req.Labels,
 			Comment:     comment,
 		}
-		payloadJSON, _ := json.Marshal(payload)
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+			return
+		}
 
 		event := &model.Event{
 			RepoID:    issue.RepoID,
@@ -611,7 +710,11 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 		payload := model.EventPayload{
 			Comment: req.Comment,
 		}
-		payloadJSON, _ := json.Marshal(payload)
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+			return
+		}
 
 		event := &model.Event{
 			RepoID:    issue.RepoID,
@@ -647,14 +750,14 @@ func (d *Daemon) updateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(issue.RepoID)
 	writeJSON(w, http.StatusOK, issue)
 }
 
 func (d *Daemon) deleteIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -675,7 +778,11 @@ func (d *Daemon) deleteIssue(w http.ResponseWriter, r *http.Request) {
 	deletePayload := model.EventPayload{
 		FromStatus: issue.Status,
 	}
-	deletePayloadJSON, _ := json.Marshal(deletePayload)
+	deletePayloadJSON, err := json.Marshal(deletePayload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+		return
+	}
 
 	event := &model.Event{
 		RepoID:    issue.RepoID,
@@ -704,6 +811,7 @@ func (d *Daemon) deleteIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(issue.RepoID)
 	writeJSON(w, http.StatusOK, issue)
 }
 
@@ -712,10 +820,9 @@ type assignIssueRequest struct {
 }
 
 func (d *Daemon) assignIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -742,7 +849,11 @@ func (d *Daemon) assignIssue(w http.ResponseWriter, r *http.Request) {
 	payload := model.EventPayload{
 		Owner: req.Owner,
 	}
-	payloadJSON, _ := json.Marshal(payload)
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+		return
+	}
 
 	event := &model.Event{
 		RepoID:    issue.RepoID,
@@ -777,6 +888,7 @@ func (d *Daemon) assignIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(issue.RepoID)
 	writeJSON(w, http.StatusOK, issue)
 }
 
@@ -789,10 +901,9 @@ type commentIssueRequest struct {
 }
 
 func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
+	id, err := parseIssueID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid issue id")
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -822,7 +933,11 @@ func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
 	payload := model.EventPayload{
 		Comment: req.Comment,
 	}
-	payloadJSON, _ := json.Marshal(payload)
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal payload: "+err.Error())
+		return
+	}
 
 	event := &model.Event{
 		RepoID:    issue.RepoID,
@@ -856,6 +971,7 @@ func (d *Daemon) commentIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d.triggerSync(issue.RepoID)
 	writeJSON(w, http.StatusCreated, issue)
 }
 

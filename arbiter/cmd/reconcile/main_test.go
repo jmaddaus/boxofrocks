@@ -48,6 +48,10 @@ func (m *mockClient) CreateComment(ctx context.Context, owner, repo string, numb
 	return &github.GitHubComment{ID: 1, Body: body, CreatedAt: time.Now()}, nil
 }
 
+func (m *mockClient) AddLabelsToIssue(ctx context.Context, owner, repo string, number int, labels []string) error {
+	return nil
+}
+
 func (m *mockClient) CreateLabel(ctx context.Context, owner, repo, name, color, description string) error {
 	return nil
 }
