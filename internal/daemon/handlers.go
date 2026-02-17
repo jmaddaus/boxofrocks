@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jmaddaus/boxofrocks/internal/engine"
+	"github.com/jmaddaus/boxofrocks/internal/github"
 	"github.com/jmaddaus/boxofrocks/internal/model"
 	"github.com/jmaddaus/boxofrocks/internal/store"
 )
@@ -212,7 +213,13 @@ func (d *Daemon) forceSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := d.syncMgr.ForceSync(repo.ID); err != nil {
+	full := r.URL.Query().Get("full") == "true"
+	if full {
+		err = d.syncMgr.ForceSyncFull(repo.ID)
+	} else {
+		err = d.syncMgr.ForceSync(repo.ID)
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -220,6 +227,66 @@ func (d *Daemon) forceSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "sync triggered",
 		"repo":   repo.FullName(),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Import all issues
+// ---------------------------------------------------------------------------
+
+func (d *Daemon) importIssues(w http.ResponseWriter, r *http.Request) {
+	if d.ghClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "GitHub client not configured; authenticate first")
+		return
+	}
+
+	repo, err := d.resolveRepo(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx := r.Context()
+
+	// List all open issues (no label filter).
+	ghIssues, _, err := d.ghClient.ListIssues(ctx, repo.Owner, repo.Name, github.ListOpts{
+		State: "open",
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list GitHub issues: "+err.Error())
+		return
+	}
+
+	labeled := 0
+	for _, issue := range ghIssues {
+		hasLabel := false
+		for _, lbl := range issue.Labels {
+			if lbl.Name == "boxofrocks" {
+				hasLabel = true
+				break
+			}
+		}
+		if !hasLabel {
+			if err := d.ghClient.AddLabelsToIssue(ctx, repo.Owner, repo.Name, issue.Number, []string{"boxofrocks"}); err != nil {
+				slog.Warn("could not label issue", "number", issue.Number, "error", err)
+				continue
+			}
+			labeled++
+		}
+	}
+
+	// Trigger sync so the newly-labeled issues get pulled in.
+	if d.syncMgr != nil {
+		if err := d.syncMgr.ForceSync(repo.ID); err != nil {
+			slog.Warn("could not trigger sync after import", "repo", repo.FullName(), "error", err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "import complete",
+		"repo":    repo.FullName(),
+		"labeled": labeled,
+		"total":   len(ghIssues),
 	})
 }
 

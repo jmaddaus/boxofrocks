@@ -70,6 +70,7 @@ func runInit(args []string, gf globalFlags) error {
 	socketFlag := fs.Bool("socket", false, "Enable Unix domain socket for sandbox agents")
 	jsonFlag := fs.Bool("json", false, "Enable file-based queue for sandbox agents")
 	updateArbiter := fs.Bool("update-arbiter", false, "Update arbiter workflow to current version")
+	importAll := fs.Bool("import-all", false, "Label all existing open GitHub issues with 'boxofrocks' for sync")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -232,7 +233,21 @@ func runInit(args []string, gf globalFlags) error {
 		}
 	}
 
-	// Step 6: Trigger initial sync unless --offline.
+	// Step 6: Import all existing issues if --import-all.
+	if *importAll && !*offline {
+		result, err := client.ImportIssues(repo)
+		if err != nil {
+			if gf.pretty {
+				fmt.Printf("Warning: could not import issues: %v\n", err)
+			}
+		} else {
+			if gf.pretty {
+				fmt.Printf("Imported %d issues (%d already labeled).\n", result.Labeled, result.Total-result.Labeled)
+			}
+		}
+	}
+
+	// Step 7: Trigger initial sync unless --offline.
 	if !*offline {
 		if err := client.ForceSync(repo); err != nil {
 			// Non-fatal: sync might not be available.
@@ -246,7 +261,7 @@ func runInit(args []string, gf globalFlags) error {
 		}
 	}
 
-	// Step 7: Print result.
+	// Step 8: Print result.
 	if gf.pretty {
 		fmt.Println()
 		fmt.Println("Ready! Run 'bor list' to see issues.")

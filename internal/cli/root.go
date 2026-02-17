@@ -25,6 +25,7 @@ Commands:
   update     Update an issue
   next       Get the next issue to work on
   assign     Assign an issue
+  sync       Trigger a sync with GitHub
   config     Configure repo settings (trusted-authors-only)
   db         Database migration tools (version, check, downgrade)
   help       Show this help
@@ -140,6 +141,8 @@ func Run(args []string, version string) error {
 		return runNext(subArgs, gf)
 	case "assign":
 		return runAssign(subArgs, gf)
+	case "sync":
+		return runSync(subArgs, gf)
 	case "config":
 		return runConfig(subArgs, gf)
 	case "db":
